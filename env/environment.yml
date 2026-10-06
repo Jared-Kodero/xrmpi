@@ -1,0 +1,22 @@
+# xrmpi's own environment. .workspace uses its separate envs/ specifications.
+# Complete the Conda solve before replacing xarray/mpi4py/h5py/netCDF4.
+name: xmpi
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python>=3.14
+  - pip
+  - setuptools>=77
+  - wheel
+  - cython>=3,<4
+  - numpy
+  - packaging
+  - pkgconfig
+  - cftime
+  - certifi
+  - pandas
+  - scipy
+  - dask
+  - rich
+  - bottleneck

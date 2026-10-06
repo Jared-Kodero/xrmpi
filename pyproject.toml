@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xrmpi"
+version = "0.1.0"
+description = "MPI-distributed xarray operations and parallel NetCDF I/O."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.14"
+authors = [{ name = "Jared M Kodero" }]
+keywords = ["climate", "xarray", "mpi", "netcdf", "distributed-memory"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Environment :: Console",
+    "Operating System :: POSIX :: Linux",
+]
+
+# xgeo supplies the shared logging, progress, and temporary-file utilities
+# currently imported by xrmpi. Parallel I/O requires the source builds in env/;
+# ordinary PyPI wheels do not guarantee a matching MPI/HDF5/NetCDF-C stack.
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "xarray",
+    "dask[array]",
+    "cftime",
+    "netCDF4",
+    "mpi4py>=3.1",
+    "rich",
+    "xgeo>=0.1.0",
+]
+
+[project.optional-dependencies]
+parallel-io = ["h5py"]
+dev = ["typing_extensions", "build", "twine", "pytest", "bottleneck", "ruff"]
+
+[tool.setuptools]
+# __init__.py is beside this file; core/ and mpp/ are namespace subpackages.
+packages = ["xrmpi", "xrmpi.core", "xrmpi.mpi", "xrmpi.mpp"]
+package-dir = { xrmpi = "." }
+
+[tool.setuptools.exclude-package-data]
+"*" = ["env/*", "test/*", "__pycache__/*"]

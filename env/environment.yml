@@ -1,5 +1,5 @@
-# xrmpi's own environment. .workspace uses its separate envs/ specifications.
-# Complete the Conda solve before replacing xarray/mpi4py/h5py/netCDF4.
+# xrmpi's own environment. .workspace uses its separate setup/mother.yaml.
+# Complete the Conda solve before the dynamic native-library rebuild.
 name: xmpi
 channels:
   - conda-forge
@@ -13,10 +13,13 @@ dependencies:
   - numpy
   - packaging
   - pkgconfig
+  - cmake
+  - make
   - cftime
   - certifi
   - pandas
   - scipy
+  - xarray
   - dask
   - rich
   - bottleneck

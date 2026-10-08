@@ -1,4 +1,4 @@
-"""Direct checks of the FMS-adapted primitives in ``xgeo.mpp``.
+"""Direct checks of the FMS-adapted primitives in ``xrmpi.mpp``.
 
 Every other module in this suite exercises these through the xarray layer,
 which is the right way to test behaviour but a poor way to test the property
@@ -18,9 +18,9 @@ from __future__ import annotations
 import numpy as np
 import xarray as xr
 from mpi4py import MPI
-from xgeo.xarray.halo import mpp_halo_exchange
 
-import xgeo as xg
+import xrmpi as xg
+from xrmpi.core.halo import mpp_halo_exchange
 from xrmpi.mpp.ext_collectives import partition_offsets
 from xrmpi.mpp.ext_domains import slice_compute_domain
 from xrmpi.mpp.ext_efp import prod_decompose, prod_recombine, reproducing_prod

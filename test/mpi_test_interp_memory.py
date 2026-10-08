@@ -4,9 +4,9 @@ import tracemalloc
 
 import numpy as np
 
-import xgeo as xg
-import xgeo.xarray.elementwise as ew
-from xgeo import MPIContext
+import xrmpi as xg
+import xrmpi.core.elementwise as ew
+from xrmpi import MPIContext
 
 mpi = MPIContext()
 comm = mpi.comm

@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import xarray as xr
 
-from xgeo import MPIContext
+from xrmpi import MPIContext
 from xrmpi.test.mpi_test_common import Fixtures, local_of, record
 
 mpi = MPIContext()

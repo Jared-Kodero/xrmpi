@@ -415,7 +415,7 @@ def mpp_update_domains(
     halo : mapping, optional
         Halo widths per dimension for the multi-axis form.
     flags : int, default BOTH_UPDATE
-        Which axes to update, from :mod:`~xgeo.mpp.mpp_parameter`.
+        Which axes to update, from :mod:`~xrmpi.mpp.mpp_parameter`.
         ``XUPDATE`` and ``YUPDATE`` select the first and second axis.
     periodic : bool or mapping, optional
         Whether each axis wraps at the global edges. Defaults to the

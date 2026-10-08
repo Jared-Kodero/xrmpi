@@ -24,8 +24,8 @@ echo "=== mpi_test_mpp_edges.py ==="
 srun -n 8 python mpi_test_mpp_edges.py
 echo "=== mpi_test_interp_memory.py ==="
 srun -n 8 python mpi_test_interp_memory.py
-echo "=== test_xnpy_store.py ==="
-python test_xnpy_store.py
+echo "=== test_support.py ==="
+python -m unittest discover -s . -p test_support.py
 
 
 # Benchmark

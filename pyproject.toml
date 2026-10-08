@@ -21,8 +21,8 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
 ]
 
-# xgeo supplies the shared logging, progress, and temporary-file utilities
-# currently imported by xrmpi. Parallel I/O requires the source builds in env/;
+# Locking, stream redirection, and temporary storage use Python's standard library.
+# Parallel I/O requires the source builds in env/;
 # ordinary PyPI wheels do not guarantee a matching MPI/HDF5/NetCDF-C stack.
 dependencies = [
     "numpy",
@@ -34,7 +34,6 @@ dependencies = [
     "netCDF4",
     "mpi4py>=3.1",
     "rich",
-    "xgeo>=0.1.0",
 ]
 
 [project.optional-dependencies]

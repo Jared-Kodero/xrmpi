@@ -51,9 +51,9 @@ import numpy as np
 import xarray as xr
 from mpi4py import MPI
 
-import xgeo as xg
-from xgeo import MPIContext
-from xgeo.xarray.core import MPIXarray
+import xrmpi as xg
+from xrmpi import MPIContext
+from xrmpi.core.core import MPIXarray
 
 mpi = MPIContext()
 

@@ -16,7 +16,6 @@ from numbers import Integral
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
-from ...xgeo.core.climtools import LockFile, tmp
 from .diagnostics import MPIDiagnostics, MPIError, get_tmpdir, tmp_cleanup
 from .mpi_init import MPI, require_mpi, world_size
 
@@ -251,6 +250,8 @@ class MPIContext(MPIDiagnostics):
     Wraps an MPI intracommunicator and provides point-to-point and collective
     communication, communicator decomposition, diagnostics, and MPI-aware
     function execution. The communicator is exposed through :attr:`comm`.
+    Scratch allocation is collective over ``comm``; :attr:`tmp_dir` exposes
+    the directory reused by progress.
 
     Parameters
     ----------
@@ -276,19 +277,14 @@ class MPIContext(MPIDiagnostics):
         self.info: tuple[int, ...] = ()
         self.task: int | None = None
 
-        # get_tmpdir broadcasts, so it is a collective and must not run for a
-        # process that is not part of an MPI job; constructing a context in a
-        # notebook would otherwise post a bcast and create a directory under
-        # $SCRATCH for a single kernel. Non-MPI use falls back to the plain
-        # per-process scratch directory core.utils already made.
+        # Allocate scratch once on this communicator. Progress reuses this
+        # directory instead of starting another collective allocation.
+        self.tmp_dir: Path = get_tmpdir(self.comm)
+        atexit.register(partial(tmp_cleanup, self.comm, self.tmp_dir))
         if self.alive(self.comm):
-            self._tmp: Path = get_tmpdir(self.comm)
-            atexit.register(partial(tmp_cleanup, self.comm, self._tmp))
             self._install_abort_hook()
-        else:
-            self._tmp = tmp
 
-        self._mpi_lock = LockFile(self._tmp / ".mpi.lock")
+        self._mpi_lock = self.tmp_dir / ".mpi.lock"
 
     @property
     def to_children(self) -> ToChildrenContext:

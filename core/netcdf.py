@@ -18,9 +18,9 @@ import numpy as np
 import xarray as xr
 from xarray.coding.times import encode_cf_datetime, encode_cf_timedelta
 
-from ...xgeo.core.progress import SerialProgressBar
 from ..mpi.diagnostics import MPIError
 from ..mpi.mpi_init import MPI
+from ..mpi.mpi_utils import SerialProgressBar
 from ..mpp.ext_collectives import gather_v
 from ..mpp.mpp import mpp_broadcast, mpp_sync
 from .chunks import get_chunk_bounds, get_chunks, get_partition_chunk_size
@@ -680,9 +680,9 @@ def mpp_to_netcdf_parallel(
 
         if is_dask_backed:
             # Import locally to avoid the ``.io``/``.netcdf`` cycle.
-            from .io import distribute_data
+            from .io import partition
 
-            local_ds = distribute_data(
+            local_ds = partition(
                 local_ds if mpi_context.comm.rank == 0 else None,
                 mpi_context,
                 dim=partition_dim if partition_dim is not None else "auto",
@@ -965,6 +965,7 @@ def to_netcdf_serial(
     complevel: int = 4,
     show_progress: bool = True,
     stdout: Any = None,
+    tmpdir: Path | None = None,
 ) -> None:
     """Write a Dataset or DataArray serially to NetCDF.
 
@@ -990,6 +991,7 @@ def to_netcdf_serial(
             complevel=complevel,
             show_progress=show_progress,
             stdout=stdout,
+            tmpdir=tmpdir,
         )
         return
 
@@ -1014,6 +1016,7 @@ def dataset_to_netcdf(
     complevel: int = 4,
     show_progress: bool = True,
     stdout: Any = None,
+    tmpdir: Path | None = None,
 ) -> None:
     """Write a Dataset, defining the file once and appending in batches.
 
@@ -1058,7 +1061,11 @@ def dataset_to_netcdf(
 
     if show_progress:
         data_slices = SerialProgressBar(
-            starts, description="Writing NetCDF file", file=stdout
+            starts,
+            description="Writing NetCDF file",
+            file=stdout,
+            lockfile=tmpdir / ".mpi.lock" if tmpdir is not None else None,
+            tmpdir=tmpdir,
         )
     else:
         data_slices = starts
@@ -1066,7 +1073,7 @@ def dataset_to_netcdf(
     for start in data_slices:
         stop = min(start + batch_size, n_items)
 
-        nc_append(
+        append_to_netcdf(
             data.isel({dim0: slice(start, stop)}),
             file,
             dim=dim0,
@@ -1124,7 +1131,7 @@ def dataarray_to_netcdf(
                 ncvar[:] = da.values
 
 
-def nc_append(
+def append_to_netcdf(
     data: xr.Dataset,
     file: str | PathLike[str],
     dim: str = "time",
@@ -1263,12 +1270,12 @@ def createVariable(
 
 __all__ = [
     "NetCDFWriteError",
+    "append_to_netcdf",
     "createVariable",
     "dataarray_to_netcdf",
     "dataset_to_netcdf",
     "mpp_to_netcdf_parallel",
     "mpp_writer_comm",
-    "nc_append",
     "resolve_unlimited_dim",
     "to_netcdf_serial",
 ]

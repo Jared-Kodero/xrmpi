@@ -7,6 +7,7 @@ collective is never entered by some ranks and skipped by others.
 import builtins
 import datetime
 import faulthandler
+import fcntl
 import hashlib
 import json
 import os
@@ -23,7 +24,6 @@ from typing import Any
 
 import numpy as np
 
-from ...xgeo.core.climtools import LockFile
 from .mpi_init import MPI
 
 
@@ -123,15 +123,20 @@ class MPIDiagnostics:
 
             kwargs.setdefault("flush", True)
 
-            with self._mpi_lock:
-                print(f"{msg_prefix}{message}", **kwargs)
+            message = f"{msg_prefix}{message}"
+            args = ()
+            logger = print
 
         else:
             if prefix:
                 message = f"{mpi_str} {message}"
 
-            with self._mpi_lock:
+        with self._mpi_lock.open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
                 logger(message, *args, **kwargs)
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     @contextmanager
     def watchdog(
@@ -365,9 +370,9 @@ class MPIDiagnostics:
         error_name = f"{uuid.uuid4().hex}.error" if MPI.COMM_WORLD.rank == 0 else None
         error_name = MPI.COMM_WORLD.bcast(error_name, root=0)
 
-        error_file = self._tmp / error_name
-        error_lock = LockFile(self._tmp / f"{error_name}.lock")
-        finished_file = self._tmp / f"{error_name}.done"
+        error_file = self.tmp_dir / error_name
+        error_lock = self.tmp_dir / f"{error_name}.lock"
+        finished_file = self.tmp_dir / f"{error_name}.done"
 
         def _abort_excepthook(
             exc_type: type[BaseException],
@@ -390,7 +395,8 @@ class MPIDiagnostics:
             reporter = False
 
             try:
-                with error_lock:
+                with error_lock.open("a") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
                     reporter = not error_file.exists()
 
                     with error_file.open("a", encoding="utf-8") as f:
@@ -408,12 +414,11 @@ class MPIDiagnostics:
 
                 records: list[dict[str, Any]] = []
 
-                with (
-                    error_lock,
-                    error_file.open("r", encoding="utf-8") as f,
-                ):
-                    for line in f:
-                        records.append(json.loads(line))
+                with error_lock.open("a") as lock:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                    with error_file.open("r", encoding="utf-8") as f:
+                        for line in f:
+                            records.append(json.loads(line))
 
                 groups: dict[
                     tuple[str, str],
@@ -514,7 +519,7 @@ def get_tmpdir(comm: MPI.Intracomm) -> Path:
             home,
         )
 
-    tmp = base / "TMP" / "xgeo" / tmp_id
+    tmp = base / "TMP" / "xrmpi" / tmp_id
     tmp.mkdir(parents=True, exist_ok=True)
 
     return tmp

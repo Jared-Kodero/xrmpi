@@ -424,7 +424,7 @@ class MPIXarray:
         -------
         MPIXarray
             ``self``, mutated in place so this chains onto a constructor
-            call, e.g. ``xgeo.create_distributed_dataarray(...).load()``.
+            call, e.g. ``xrmpi.create_distributed_dataarray(...).load()``.
 
         """
         self.data = self.data.load()

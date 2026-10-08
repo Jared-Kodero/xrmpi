@@ -10,9 +10,9 @@ import math
 import numpy as np
 import xarray as xr
 from mpi4py import MPI
-from xgeo.xarray.core import MPIXarray
 
-from xgeo import MPIContext
+from xrmpi import MPIContext
+from xrmpi.core.core import MPIXarray
 from xrmpi.mpp.ext_efp import reproducing_prod
 from xrmpi.test.mpi_test_common import (
     Fixtures,

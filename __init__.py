@@ -4,16 +4,16 @@ The public API provides:
 
 - ``MPIContext``: the communicator, rank information, and MPI diagnostics.
 - ``MPIXarray``: an xarray-like wrapper for a rank-local distributed object.
-- ``open_distributed_dataset``, ``create_distributed_dataarray``,
-  ``create_distributed_dataset``, and ``distribute_data``: distributed-array
-  construction and partitioning.
-- ``empty_distributed_dataset`` and ``is_distributed_empty``: helpers for
-  ranks with empty partitions.
-- ``to_netcdf`` and ``nc_append``: serial or collective NetCDF output.
+- ``open_dataset``: open a NetCDF file lazily and partition it across ranks.
+- ``new_dataarray`` and ``new_dataset``: build distributed objects from fill
+  functions and global sizes.
+- ``partition``: split a root-owned xarray object across ranks.
+- ``to_netcdf`` and ``append_to_netcdf``: serial or collective NetCDF output.
 
 Implementations live in ``xrmpi.core``, ``xrmpi.mpi``, and ``xrmpi.mpp``.
 Geospatial analysis, plotting, colormaps, and memory-mapped storage belong
 in the separate ``xgeo`` package.
+Both packages can be installed independently.
 
 Public objects load on first attribute access. Importing ``xrmpi`` alone
 therefore does not import mpi4py or initialize MPI. Resolving an MPI entry
@@ -26,13 +26,13 @@ Example, executed by every participating rank::
     import xrmpi as xm
 
     mpi = xm.MPIContext()
-    data = xm.open_distributed_dataset("data.nc", mpi, partition_dim="time")
+    data = xm.open_dataset("data.nc", mpi, partition_dim="time")
     result = data.mean(dim="time")
     data.to_netcdf("output.nc", parallel=True)
 
 Collective operations require all ranks in the communicator to participate.
 Parallel NetCDF output requires the matching MPI/HDF5/NetCDF-C stack
-installed by ``env/setup_env.py`` or the author's separate workspace setup.
+installed by ``env/build_libs.sh`` or the author's separate workspace setup.
 """
 
 from __future__ import annotations
@@ -46,13 +46,11 @@ os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 if TYPE_CHECKING:
     from .core.core import MPIXarray
     from .core.io import (
-        create_distributed_dataarray,
-        create_distributed_dataset,
-        distribute_data,
-        empty_distributed_dataset,
-        is_distributed_empty,
-        nc_append,
-        open_distributed_dataset,
+        append_to_netcdf,
+        new_dataarray,
+        new_dataset,
+        open_dataset,
+        partition,
         to_netcdf,
     )
     from .mpi.context import MPIContext
@@ -60,26 +58,22 @@ if TYPE_CHECKING:
 __all__ = [
     "MPIContext",
     "MPIXarray",
-    "create_distributed_dataarray",
-    "create_distributed_dataset",
-    "distribute_data",
-    "empty_distributed_dataset",
-    "is_distributed_empty",
-    "nc_append",
-    "open_distributed_dataset",
+    "append_to_netcdf",
+    "new_dataarray",
+    "new_dataset",
+    "open_dataset",
+    "partition",
     "to_netcdf",
 ]
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "MPIContext": (".mpi.context", "MPIContext"),
     "MPIXarray": (".core.core", "MPIXarray"),
-    "create_distributed_dataarray": (".core.io", "create_distributed_dataarray"),
-    "create_distributed_dataset": (".core.io", "create_distributed_dataset"),
-    "distribute_data": (".core.io", "distribute_data"),
-    "empty_distributed_dataset": (".core.io", "empty_distributed_dataset"),
-    "is_distributed_empty": (".core.io", "is_distributed_empty"),
-    "nc_append": (".core.io", "nc_append"),
-    "open_distributed_dataset": (".core.io", "open_distributed_dataset"),
+    "append_to_netcdf": (".core.io", "append_to_netcdf"),
+    "new_dataarray": (".core.io", "new_dataarray"),
+    "new_dataset": (".core.io", "new_dataset"),
+    "open_dataset": (".core.io", "open_dataset"),
+    "partition": (".core.io", "partition"),
     "to_netcdf": (".core.io", "to_netcdf"),
 }
 

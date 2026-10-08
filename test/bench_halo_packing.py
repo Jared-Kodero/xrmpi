@@ -15,9 +15,9 @@ import numpy as np
 import xarray as xr
 from mpi4py import MPI
 
-import xgeo as xg
-from xgeo import MPIContext
-from xgeo.xarray.halo import mpp_halo_exchange
+import xrmpi as xg
+from xrmpi import MPIContext
+from xrmpi.core.halo import mpp_halo_exchange
 
 mpi = MPIContext()
 

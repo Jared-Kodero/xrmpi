@@ -12,12 +12,11 @@ from __future__ import annotations
 import numpy as np
 import xarray as xr
 
-from xgeo import MPIContext
+from xrmpi import MPIContext
+from xrmpi.core.core import MPIXarray
+from xrmpi.test.mpi_test_common import Fixtures, local_of, record
 
 mpi = MPIContext()
-from xgeo.xarray.core import MPIXarray
-
-from xrmpi.test.mpi_test_common import Fixtures, local_of, record
 
 
 def run(fx: Fixtures) -> None:

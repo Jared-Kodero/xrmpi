@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from xgeo import MPIContext
+from xrmpi import MPIContext
 
 mpi = MPIContext()
 
@@ -22,9 +22,6 @@ PATH2D = OUTPUT_DIR / "mock_data2d.nc"
 # ---------------------------------------------------------------------------
 # Shared, whole-suite geophysical mock dataset
 # ---------------------------------------------------------------------------
-
-
-from pathlib import Path
 
 
 def build_dataset(

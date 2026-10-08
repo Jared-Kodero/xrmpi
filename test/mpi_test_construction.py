@@ -11,10 +11,10 @@ import shutil
 
 import numpy as np
 import xarray as xr
-from xgeo.xarray.core import MPIXarray
 
-import xgeo as xg
-from xgeo import MPIContext
+import xrmpi as xg
+from xrmpi import MPIContext
+from xrmpi.core.core import MPIXarray
 from xrmpi.test.mock_dataset import PATH
 from xrmpi.test.mpi_test_common import Fixtures, local_of, record
 

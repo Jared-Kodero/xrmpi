@@ -15,10 +15,10 @@ from dataclasses import dataclass
 
 import numpy as np
 import xarray as xr
-from xgeo.xarray.core import MPIXarray
 
-import xgeo as xg
-from xgeo import MPIContext
+import xrmpi as xg
+from xrmpi import MPIContext
+from xrmpi.core.core import MPIXarray
 from xrmpi.mpp.mpp_do_update import HaloWidthError
 from xrmpi.test.mock_dataset import PATH, PATH2D, create_dataset
 
@@ -104,7 +104,7 @@ def phase(label: str, timeout: float | None = None):
 #: Substring of the ValueError mpp_halo_exchange() raises when some rank's
 #: local partition along the requested dimension is shorter than the
 #: before/after halo width being asked of it (see
-#: xgeo.xarray.arithmetic.mpp_halo_exchange's docstring). Every
+#: xrmpi.core.halo.mpp_halo_exchange's docstring). Every
 #: halo-based op -- rolling_reduce, coarsen_reduce, diff, shift,
 #: differentiate, ffill, bfill, roll, ... -- funnels through the same
 #: mpp_halo_exchange() and so can hit this identical, deliberate refusal

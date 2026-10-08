@@ -2,7 +2,7 @@
 
 Mirrors FMS ``mpp/mpp.F90``: collectives and communicator handling that
 know nothing about how an array is decomposed. Anything that reasons about
-a decomposition lives in :mod:`~xgeo.mpp.mpp_domains` instead.
+a decomposition lives in :mod:`~xrmpi.mpp.mpp_domains` instead.
 """
 
 from __future__ import annotations

@@ -24,6 +24,8 @@ SAVED_VARS = (
     "LD_LIBRARY_PATH",
     "PATH",
     "HDF5_INCDIR",
+    "HDF5_INCLUDEDIR",
+    "HDF5_PKGCONFIG_NAME",
     "HDF5_LIBDIR",
     "MPI4PY_BUILD_MPICC",
     "HDF5_DIR",
@@ -115,8 +117,7 @@ fi
 export HDF5_USE_FILE_LOCKING="FALSE"
 export HDF5_DIR={shlex.quote(hdf5_dir)}
 export NETCDF4_DIR={shlex.quote(netcdf4_dir)}
-export HDF5_INCDIR={shlex.quote(str(Path(hdf5_dir) / "include"))}
-export HDF5_LIBDIR={shlex.quote(hdf5_libdir)}
+unset HDF5_INCDIR HDF5_INCLUDEDIR HDF5_LIBDIR HDF5_PKGCONFIG_NAME
 export PATH={shlex.quote(str(Path(mpicc).parent))}:"${{PATH:-}}"
 _{prefix}_LIBDIR={shlex.quote(library_path)}
 _{prefix}_LDPATH="${{LD_LIBRARY_PATH:+:${{LD_LIBRARY_PATH}}}}"

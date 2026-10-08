@@ -1,6 +1,6 @@
 """Build distributed objects and place existing data onto a domain.
 
-Defining how an array is divided is :mod:`~xgeo.mpp.mpp_domains`'s job;
+Defining how an array is divided is :mod:`~xrmpi.mpp.mpp_domains`'s job;
 this module applies that division to xarray objects, either by creating one
 whose blocks are filled per rank or by cutting an existing object on the root
 rank and sending each piece to its owner.

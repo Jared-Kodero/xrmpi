@@ -1,16 +1,34 @@
 #!/bin/bash -l
-# Build the target environment's MPI stack using this setup's own helpers.
-# Usage: bash build_libs.sh <environment-prefix-or-conda-name>
+# Usage: bash env/build_libs.sh <environment-prefix-or-conda-name>
+
+target="${CONDA_PREFIX:-${VIRTUAL_ENV:-}}"
+
+# Restart as a login shell when invoked with `bash env/build_libs.sh`.
+if ! shopt -q login_shell; then
+    if (( $# == 0 )) && [[ -n "$target" ]]; then
+        set -- "$target"
+    fi
+    exec bash -l "$0" "$@"
+fi
 
 set -eo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-source "$script_dir/utils.sh"
-target="${1:-${CONDA_PREFIX:-${VIRTUAL_ENV:-}}}"
+if [[ $# -gt 0 && "$1" != --* ]]; then
+    target="$1"
+    shift
+fi
+
+if (( $# )); then
+    echo "Usage: bash env/build_libs.sh [environment-prefix-or-conda-name]" >&2
+    exit 1
+fi
+
 if [[ -z "$target" || "$target" == "base" ]]; then
     echo "Specify a non-base environment prefix or Conda name." >&2
     exit 1
 fi
+
 if [[ -x "$target/bin/python" ]]; then
     env_prefix="$(cd "$target" && pwd -P)"
 else
@@ -18,72 +36,85 @@ else
     conda activate "$target"
     env_prefix="$CONDA_PREFIX"
 fi
-python="$env_prefix/bin/python"
-export XRMPI_STACK_PREFIX="${XRMPI_STACK_PREFIX:-$env_prefix/opt/parallel-io}"
 
-stack="$("$python" "$script_dir/find_stack.py")"
+export XRMPI_STACK_PREFIX="${XRMPI_STACK_PREFIX:-$HOME/.local/hpc_parallel_io}"
+python="$env_prefix/bin/python"
+export PATH="$env_prefix/bin:$PATH"
+
+"$python" "$script_dir/config_stack.py" --clean
+
+# Use the system module stack; build HDF5/NetCDF-C only when none is usable.
+stack="$("$python" "$script_dir/config_stack.py" --find)"
 eval "$stack"
-if [[ -n "$MPI_MODULE" || -n "$NETCDF_MODULE" ]]; then
+
+if [[ -n "$MPI_MODULE" ]]; then
     module purge
-    [[ -z "$MPI_MODULE" ]] || module load "$MPI_MODULE"
-    [[ -z "$NETCDF_MODULE" ]] || module load "$NETCDF_MODULE"
+    module load "$MPI_MODULE"
+    if [[ -n "$NETCDF_MODULE" ]]; then
+        module load "$NETCDF_MODULE"
+    fi
 fi
 
-export NETCDF4_DIR HDF5_DIR HDF5_LIBDIR
-export HDF5_INCDIR="$HDF5_DIR/include"
+mpi_prefix="$(dirname "$(dirname "$MPICC")")"
+library_path="$HDF5_DIR/lib:$HDF5_DIR/lib64:$NETCDF4_DIR/lib:$NETCDF4_DIR/lib64:$mpi_prefix/lib:$mpi_prefix/lib64"
+
+export HDF5_DIR NETCDF4_DIR
+export HDF5_USE_FILE_LOCKING=FALSE
+export LD_LIBRARY_PATH="$library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export PATH="$(dirname "$MPICC"):$env_prefix/bin:$PATH"
-stack_library_path="$HDF5_LIBDIR:$NETCDF4_DIR/lib:$NETCDF4_DIR/lib64"
-export LD_LIBRARY_PATH="$stack_library_path${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export MPI4PY_BUILD_MPICC="$MPICC"
 
-phase "Parallel I/O build roots"
-echo "Python:      $python"
-echo "mpicc:       $MPICC"
-echo "HDF5 root:   $HDF5_DIR"
-echo "NetCDF root: $NETCDF4_DIR"
+hdf5_libdir="$HDF5_LIBDIR"
+unset HDF5_INCDIR HDF5_INCLUDEDIR HDF5_LIBDIR HDF5_PKGCONFIG_NAME
 
-phase "Removing existing xarray/mpi4py/h5py/netCDF4"
-"$python" "$script_dir/clean_stack.py"
+printf '\nParallel I/O build roots\n'
+printf 'Python: %s\nMPI module: %s\nmpicc: %s\nHDF5: %s\nNetCDF-C: %s\n' \
+    "$python" "$MPI_MODULE" "$MPICC" "$HDF5_DIR" "$NETCDF4_DIR"
 
-phase "Installing stack activation hooks"
 "$python" "$script_dir/conda_hooks.py" \
     --prefix "$env_prefix" \
-    --env-name "$(basename "$env_prefix")" \
+    --env-name "${env_prefix##*/}" \
     --mpi-module "$MPI_MODULE" \
     --netcdf-module "$NETCDF_MODULE" \
     --hdf5-dir "$HDF5_DIR" \
     --netcdf4-dir "$NETCDF4_DIR" \
-    --hdf5-libdir "$HDF5_LIBDIR" \
+    --hdf5-libdir "$hdf5_libdir" \
     --mpicc "$MPICC" \
-    --library-path "$stack_library_path"
+    --library-path "$library_path"
 
-phase "Building mpi4py"
-export MPI4PY_BUILD_MPICC="$MPICC"
 export CC="$MPICC"
-"$python" -m pip install \
-    --no-cache-dir --no-binary=mpi4py --no-build-isolation --no-deps mpi4py
+export HDF5_MPI=ON
+export H5PY_SETUP_REQUIRES=0
 
-phase "Building h5py with parallel HDF5"
-export HDF5_MPI="ON"
-"$python" -m pip install \
-    --no-cache-dir --no-binary=h5py --no-build-isolation --no-deps h5py
-
-phase "Building netCDF4"
-"$python" -m pip install \
-    --no-cache-dir --no-binary=netCDF4 --no-build-isolation --no-deps netCDF4
-unset CC HDF5_MPI
-
-phase "Reinstalling xarray"
-"$python" -m pip install --no-cache-dir --no-deps xarray
-
-phase "Verifying parallel I/O support"
-check_parallel "$python"
-"$python" -c 'import xarray; print("xarray", xarray.__version__)'
-
-phase "Parallel extension linkage"
-for extension in \
-    "$("$python" -c 'import h5py.h5f; print(h5py.h5f.__file__)')" \
-    "$("$python" -c 'import netCDF4._netCDF4; print(netCDF4._netCDF4.__file__)')"; do
-    echo "$extension"
-    ldd "$extension" | grep -Ei 'hdf5|netcdf|mpi' || true
+# Conda Python's link flags put -L$CONDA_PREFIX/lib first, where Conda's serial
+# HDF5/NetCDF remain for other packages; link and rpath the parallel libraries.
+LDSHARED="$MPICC -shared"
+IFS=: read -ra library_dirs <<< "$library_path"
+for library_dir in "${library_dirs[@]}"; do
+    if [[ -d "$library_dir" ]]; then
+        LDSHARED+=" -L$library_dir -Wl,-rpath,$library_dir"
+    fi
 done
-phase "Parallel MPI/HDF5/NetCDF stack installed successfully"
+export LDSHARED
+
+for package in mpi4py h5py netCDF4; do
+    printf '\nBuilding %s with pip --no-deps\n' "$package"
+    "$python" -m pip install \
+        --no-cache-dir \
+        --no-deps \
+        --no-build-isolation \
+        "--no-binary=$package" \
+        --force-reinstall \
+        "$package"
+done
+
+unset CC HDF5_MPI H5PY_SETUP_REQUIRES LDSHARED
+
+"$python" -m pip install \
+    --no-cache-dir \
+    --no-deps \
+    --no-build-isolation \
+    --force-reinstall \
+    xarray
+
+"$python" "$script_dir/config_stack.py" --verify

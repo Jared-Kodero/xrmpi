@@ -1,4 +1,4 @@
-"""Reproducible products, extending :mod:`~xgeo.mpp.mpp_efp`.
+"""Reproducible products, extending :mod:`~xrmpi.mpp.mpp_efp`.
 
 FMS provides a reproducible *sum* in extended fixed point but no
 product. This builds one on the same machinery: exponents sum exactly

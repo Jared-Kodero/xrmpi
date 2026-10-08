@@ -6,7 +6,7 @@ Run standalone: ``mpirun -n 4 python test/mpi_test_mpp_edges.py``
 
 import numpy as np
 
-from xgeo import MPIContext
+from xrmpi import MPIContext
 from xrmpi.mpp.mpp_do_update import HaloWidthError, mpp_update_domains
 from xrmpi.mpp.mpp_domains import Domain
 from xrmpi.mpp.mpp_domains_define import mpp_compute_extent

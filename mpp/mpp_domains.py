@@ -2,12 +2,12 @@
 
 Mirrors FMS ``mpp/mpp_domains.F90``, which declares the domain types and
 leaves the routines that act on them to the files it includes:
-:mod:`~xgeo.mpp.mpp_domains_define`,
-:mod:`~xgeo.mpp.mpp_domains_util`,
-:mod:`~xgeo.mpp.mpp_do_update`,
-:mod:`~xgeo.mpp.mpp_group_update`,
-:mod:`~xgeo.mpp.mpp_global_field` and
-:mod:`~xgeo.mpp.mpp_global_reduce`.
+:mod:`~xrmpi.mpp.mpp_domains_define`,
+:mod:`~xrmpi.mpp.mpp_domains_util`,
+:mod:`~xrmpi.mpp.mpp_do_update`,
+:mod:`~xrmpi.mpp.mpp_group_update`,
+:mod:`~xrmpi.mpp.mpp_global_field` and
+:mod:`~xrmpi.mpp.mpp_global_reduce`.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class Domain:
         last ranks are neighbours. FMS carries this on the domain as
         ``CYCLIC_GLOBAL_DOMAIN`` rather than passing it per call.
     fold : int
-        Folded edges, from :mod:`~xgeo.mpp.mpp_parameter`. Zero means
+        Folded edges, from :mod:`~xrmpi.mpp.mpp_parameter`. Zero means
         none. A fold joins an axis to itself in reverse, closing a tripolar
         grid across the pole.
 

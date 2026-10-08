@@ -39,12 +39,12 @@ from .meta import (
     mpp_update_meta,
     set_save_chunks,
 )
-from .netcdf import mpp_to_netcdf_parallel, nc_append, to_netcdf_serial
+from .netcdf import append_to_netcdf, mpp_to_netcdf_parallel, to_netcdf_serial
 
 __all__ = [
-    "empty_distributed_dataset",
+    "append_to_netcdf",
+    "empty_dataset",
     "is_distributed_empty",
-    "nc_append",
     "to_netcdf",
 ]
 
@@ -197,7 +197,7 @@ def mpp_attach_save_chunks(
     return value
 
 
-def open_distributed_dataset(
+def open_dataset(
     filename: Path | str | PathLike,
     mpi_context: MPIContext | MPI.Intracomm,
     *,
@@ -268,7 +268,7 @@ def open_distributed_dataset(
     return MPIXarray(data, mpi_context)
 
 
-def create_distributed_dataarray(
+def new_dataarray(
     mpi_context: MPIContext | MPI.Intracomm,
     fill: Callable[..., Any],
     dims: Sequence[Hashable],
@@ -313,6 +313,40 @@ def create_distributed_dataarray(
     -------
     MPIXarray
         Distributed DataArray wrapper.
+
+    Examples
+    --------
+    Run on every rank, for example with ``mpirun -n 4 python script.py``.
+    ``fill`` receives one array of global indices per dimension, as in
+    :func:`numpy.fromfunction`, and each rank evaluates it only on its own
+    slice of ``time``:
+
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> import xrmpi as xm
+    >>> def fill(t, y, x):
+    ...     # Hourly air temperature in K from global grid indices.
+    ...     lat = 40.5 + 0.25 * y
+    ...     diurnal = 5.0 * np.sin(2.0 * np.pi * (t % 24) / 24.0)
+    ...     return 300.0 - 0.6 * lat + diurnal + 0.0 * x
+    ...
+    >>> mpi = xm.MPIContext()
+    >>> tas = xm.new_dataarray(
+    ...     mpi,
+    ...     fill,
+    ...     ("time", "lat", "lon"),
+    ...     shape={"time": 8760, "lat": 29, "lon": 33},
+    ...     dim="time",
+    ...     dtype=np.float32,
+    ...     coords={
+    ...         "time": pd.date_range("2000-01-01", periods=8760, freq="h"),
+    ...         "lat": np.linspace(40.5, 47.5, 29),
+    ...         "lon": np.linspace(-75.0, -67.0, 33),
+    ...     },
+    ...     name="tas",
+    ...     attrs={"units": "K", "long_name": "air temperature"},
+    ... )
+
     """
     from .core import MPIXarray
 
@@ -335,7 +369,7 @@ def create_distributed_dataarray(
     return MPIXarray(data, mpi_context)
 
 
-def create_distributed_dataset(
+def new_dataset(
     mpi_context: MPIContext | MPI.Intracomm,
     data_vars: Mapping[
         Hashable, xr.DataArray | tuple[Sequence[Hashable], Callable[..., Any]]
@@ -374,6 +408,45 @@ def create_distributed_dataset(
     -------
     MPIXarray
         Distributed Dataset wrapper.
+
+    Examples
+    --------
+    Run on every rank, for example with ``mpirun -n 4 python script.py``.
+    Each ``fill`` receives one array of global indices per dimension of its
+    variable, as in :func:`numpy.fromfunction`, and each rank evaluates it
+    only on its own slice of ``time``:
+
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> import xrmpi as xm
+    >>> def fill_tas(t, y, x):
+    ...     # Hourly air temperature in K from global grid indices.
+    ...     lat = 40.5 + 0.25 * y
+    ...     diurnal = 5.0 * np.sin(2.0 * np.pi * (t % 24) / 24.0)
+    ...     return 300.0 - 0.6 * lat + diurnal + 0.0 * x
+    ...
+    >>> def fill_pr(t, y, x):
+    ...     # Precipitation flux in kg m-2 s-1, peaking in the afternoon.
+    ...     cycle = 1.0 + np.sin(2.0 * np.pi * ((t % 24) - 9.0) / 24.0)
+    ...     return 1.0e-5 * cycle**2 * (1.0 + 0.02 * y) + 0.0 * x
+    ...
+    >>> mpi = xm.MPIContext()
+    >>> ds = xm.new_dataset(
+    ...     mpi,
+    ...     {
+    ...         "tas": (("time", "lat", "lon"), fill_tas),
+    ...         "pr": (("time", "lat", "lon"), fill_pr),
+    ...     },
+    ...     {"time": 8760, "lat": 29, "lon": 33},
+    ...     dim="time",
+    ...     dtype=np.float32,
+    ...     coords={
+    ...         "time": pd.date_range("2000-01-01", periods=8760, freq="h"),
+    ...         "lat": np.linspace(40.5, 47.5, 29),
+    ...         "lon": np.linspace(-75.0, -67.0, 33),
+    ...     },
+    ...     attrs={"title": "synthetic hourly fields"},
+    ... )
     """
     from .core import MPIXarray
 
@@ -394,7 +467,7 @@ def create_distributed_dataset(
     return MPIXarray(data, mpi_context)
 
 
-def distribute_data(
+def partition(
     value: MPIXarray | xr.Dataset | xr.DataArray | None,
     mpi_context: MPIContext | MPI.Intracomm,
     dim: Hashable | Sequence[Hashable] | Literal["auto"] = "auto",
@@ -442,7 +515,7 @@ def distribute_data(
     return MPIXarray(data, mpi_context)
 
 
-def empty_distributed_dataset() -> xr.Dataset:
+def empty_dataset() -> xr.Dataset:
     """Return a placeholder Dataset for a non-root MPI rank.
 
     Returns
@@ -477,7 +550,6 @@ def to_netcdf(
     mpi_context: MPIContext | MPI.Intracomm | None = None,
     unlimited_dim: str | Iterable[str] | None = None,
     partition_dim: str | None = None,
-    *,
     parallel: bool = False,
     batch_size: int = 24,
     format: str = "NETCDF4",
@@ -566,7 +638,7 @@ def to_netcdf(
                 )
             partition_dim = distributed_dim
         elif mpi_context.comm.rank != 0:
-            data = empty_distributed_dataset()
+            data = empty_dataset()
 
         mpp_to_netcdf_parallel(
             mpi_context,
@@ -594,4 +666,5 @@ def to_netcdf(
         complevel=complevel,
         show_progress=show_progress,
         stdout=stdout,
+        tmpdir=mpi_context.tmp_dir if isinstance(mpi_context, MPIContext) else None,
     )

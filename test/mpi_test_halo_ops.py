@@ -7,9 +7,9 @@ deliberately-uneven single-dimension partition (see mpi_test_common).
 from __future__ import annotations
 
 import xarray as xr
-from xgeo.xarray.core import MPIXarray
 
-from xgeo import MPIContext
+from xrmpi import MPIContext
+from xrmpi.core.core import MPIXarray
 from xrmpi.test.mpi_test_common import (
     Fixtures,
     is_declared_halo_refusal,

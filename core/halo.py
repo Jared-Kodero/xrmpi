@@ -1,6 +1,6 @@
 """Halo exchange and whole-field movement for xarray objects.
 
-:mod:`xgeo.mpp` works on plain arrays and :class:`~xgeo.mpp.
+:mod:`xrmpi.mpp` works on plain arrays and :class:`~xrmpi.mpp.
 mpp_domains.Domain` objects and knows nothing about xarray. This module is
 the adapter: it reads the partition metadata off a Dataset or DataArray,
 calls the mpp primitives, and puts the metadata back on the result.

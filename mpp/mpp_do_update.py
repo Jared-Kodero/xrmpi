@@ -225,7 +225,11 @@ def mpp_start_update_domains(
             count = int(np.prod(shape)) if shape else 1
             # Restore each field's original dtype after unpacking the wire
             # representation.
-            out[name] = flat[pos : pos + count].reshape(shape).view(items[name].dtype)
+            # Copy: ``flat`` is a pooled wire buffer that goes back to the pool
+            # as soon as the exchange completes and is then reused.
+            out[name] = (
+                flat[pos : pos + count].reshape(shape).view(items[name].dtype).copy()
+            )
             pos += count
         return out
 
@@ -299,7 +303,8 @@ def mpp_complete_update_domains(
                 update.unpack(update.recv_bufs[dtype, "after"], names, update.after)
             )
 
-    # unpack() copies out of the wire buffers, so they can go back to the pool
+    # unpack() copies out of the wire buffers (see ``_unpack``), so they can go
+    # back to the pool
     # for the next exchange to reuse.
     for buffer in update.recv_bufs.values():
         put_stack(buffer)

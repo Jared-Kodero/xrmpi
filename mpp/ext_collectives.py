@@ -84,6 +84,23 @@ def partition_offsets(comm: MPI.Comm, local_length: int) -> tuple[int, int, int]
     return int(total[0]), start, start + int(length[0])
 
 
+def materialize(obj: Any) -> Any:
+    """Evaluate lazy xarray objects before they are pickled onto the wire.
+
+    A chunked object pickles as its task graph rather than its values, which
+    ships closures and open file handles to a rank that cannot run them and
+    moves far more than the data. Non-xarray objects pass through unchanged,
+    and tuples, lists and dicts are searched one level deep.
+    """
+    if type(obj).__module__.startswith("xarray") and getattr(obj, "chunks", None):
+        return obj.load()
+    if isinstance(obj, (tuple, list)):
+        return type(obj)(materialize(item) for item in obj)
+    if isinstance(obj, dict):
+        return {key: materialize(item) for key, item in obj.items()}
+    return obj
+
+
 def gather_v(
     local: Any, comm: MPI.Comm, *, root: int | None = None
 ) -> list[Any] | None:
@@ -109,6 +126,7 @@ def gather_v(
         One entry per rank in rank order, or None on non-root ranks when
         ``root`` is given.
     """
+    local = materialize(local)
     if root is None:
         return comm.allgather(local)
     return comm.gather(local, root=root)
@@ -134,4 +152,4 @@ def scatter_v(value: list[Any] | None, comm: MPI.Comm, *, root: int = 0) -> Any:
     Any
         This rank's entry.
     """
-    return comm.scatter(value, root=root)
+    return comm.scatter(materialize(value), root=root)

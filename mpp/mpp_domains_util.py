@@ -5,17 +5,14 @@ Mirrors FMS ``mpp/include/mpp_domains_util.inc``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
-from .ext_domains import get_cartesian_domain
-from .mpp_domains_define import mpp_compute_extent
+from .ext_domains import dim_comm, get_cartesian_domain
 from .mpp import mpp_chksum
 from .mpp_domains import Domain, DomainMismatchError
-
-if TYPE_CHECKING:
-    pass
+from .mpp_domains_define import mpp_compute_extent
 
 
 def mpp_get_compute_domain(domain: Domain, dim: str) -> tuple[int, int]:
@@ -120,7 +117,7 @@ def mpp_get_layout(domain: Domain) -> tuple[int, ...]:
         Divisions along each partitioned dimension.
     """
     if domain.cart is not None:
-        return tuple(int(n) for n in domain.cart["shape"])
+        return tuple(int(n) for n in domain.cart["grid_shape"])
     return (domain.comm.size,)
 
 
@@ -182,7 +179,7 @@ def mpp_get_domain_components(domain: Domain) -> dict[str, Domain]:
             global_sizes={dim: domain.global_sizes[dim]},
             starts={dim: domain.starts[dim]},
             stops={dim: domain.stops[dim]},
-            comm=domain.comm,
+            comm=dim_comm(domain, dim),
             halo={dim: domain.halo[dim]} if dim in domain.halo else {},
             cyclic={dim: domain.cyclic[dim]} if dim in domain.cyclic else {},
         )
@@ -213,7 +210,10 @@ def mpp_get_neighbor_pe(
     rank = comm.rank
 
     if len(domain.dims) > 1:
-        topology = get_cartesian_domain(comm, domain.dims, domain.global_sizes)
+        grid_shape = None if domain.cart is None else domain.cart["grid_shape"]
+        topology = get_cartesian_domain(
+            comm, domain.dims, domain.global_sizes, grid_shape
+        )
         if periodic:
             axis = domain.dims.index(dim)
             axis_size = topology.grid_shape[axis]
@@ -236,11 +236,13 @@ def mpp_get_neighbor_pe(
 def mpp_check_field(
     field: np.ndarray[Any, Any], domain: Domain, *, label: str = "field"
 ) -> None:
-    """Verify every rank holds the same values where their domains overlap.
+    """Verify that a replicated field is bitwise identical on every rank.
 
-    FMS ``mpp_check_field`` is a debugging aid: it catches a halo update that
-    silently failed to propagate, which otherwise shows up much later as a
-    wrong answer.
+    FMS ``mpp_check_field`` is a debugging aid: it catches a field that has
+    silently diverged between ranks, which otherwise shows up much later as a
+    wrong answer. The comparison is of whole-field checksums, so it applies
+    to data every rank is meant to hold in full, not to distinct compute
+    domains.
 
     Parameters
     ----------

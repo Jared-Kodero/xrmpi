@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-import warnings
 from collections.abc import Hashable
 from typing import TYPE_CHECKING, Literal
 
@@ -31,6 +30,7 @@ from .planning import (
     mpp_reduction_plan,
     mpp_resolve_comm,
     partial_dtype,
+    skipna_enabled,
 )
 
 _GROUP_DIM = "_mpi_group"
@@ -220,12 +220,29 @@ def _group_combine(
 
     minimum = op == "min"
     identity = extreme_identity(variable.dtype, minimum=minimum)
-    return reduce(
-        partial(op, identity, skipna),
-        MPI.MIN if minimum else MPI.MAX,
-        variable.dtype,
-        op,
+    mpi_op = MPI.MIN if minimum else MPI.MAX
+    local = partial(op, identity, skipna)
+    if variable.dtype.kind != "f":
+        return reduce(local, mpi_op, variable.dtype, op)
+
+    # A group present on a rank but entirely missing there reduces to NaN,
+    # and MPI leaves MIN/MAX with a NaN operand undefined. Neutralise those
+    # entries, then restore NaN where the group has no valid value anywhere
+    # (skipna) or holds any NaN (no skipna).
+    missing = local.isnull()
+    result = reduce(local.fillna(identity), mpi_op, variable.dtype, op)
+    if skipna_enabled(variable.dtype, skipna):
+        valid = reduce(
+            partial("count", 0, None),
+            MPI.SUM,
+            partial_dtype(variable.dtype.str, "count", None),
+            "count",
+        )
+        return result.where(valid > 0)
+    any_missing = reduce(
+        missing.astype(np.int32), MPI.MAX, np.dtype(np.int32), "missing"
     )
+    return result.where(any_missing == 0)
 
 
 def _resample_bin_labels(
@@ -243,13 +260,29 @@ def _resample_bin_labels(
         fixed_duration = False
 
     if not fixed_duration:
-        # Calendar-anchored: absolute regardless of which timestamps
-        # this rank happens to hold, so no shared origin is needed.
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            edges = pd.Series(0, index=timestamps).resample(freq).count().index
-        positions = edges.searchsorted(timestamps, side="right") - 1
-        return edges[positions]
+        # Calendar offsets (weeks, months, ...) are labelled by pandas at the bin
+        # edge it chooses (right edge for ``W``, ``ME``, ``QE``, ``YE``), and a
+        # multiple such as ``2MS`` starts counting at the first timestamp. Label
+        # every element with xarray's own resampler, seeded with the global
+        # earliest timestamp so all ranks agree on the origin.
+        local_min_ns = (
+            int(timestamps.as_unit("ns").asi8.min())
+            if len(timestamps)
+            else np.iinfo(np.int64).max
+        )
+        global_min_ns = comm.allreduce(local_min_ns, op=MPI.MIN)
+        if global_min_ns == np.iinfo(np.int64).max:
+            return timestamps
+        seed = np.datetime64(global_min_ns, "ns").astype(timestamps.dtype)
+        combined = pd.DatetimeIndex(
+            np.unique(np.concatenate([np.asarray(timestamps.values), [seed]]))
+        )
+        probe = xr.DataArray(np.arange(len(combined)), dims="t", coords={"t": combined})
+        bin_labels = np.empty(len(combined), dtype=combined.dtype)
+        for label, selection in probe.resample(t=freq).groups.items():
+            bin_labels[selection] = label
+        positions = combined.searchsorted(timestamps)
+        return pd.DatetimeIndex(bin_labels[positions])
 
     # Derive one global start-day anchor with ``MPI.MIN`` and normalize timestamps to
     # nanoseconds.

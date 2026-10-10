@@ -191,7 +191,7 @@ The communication layer is adapted from GFDL's [FMS](https://github.com/NOAA-GFD
 
 ## Testing
 
-The MPI scripts are in [`test/`](test/). They require a matching MPI launcher and sufficient memory for their fixture sizes. Run the independent helper tests without MPI using `python -m unittest discover -s test -p test_support.py`. [`env/test_stack.py`](env/test_stack.py) checks the installed MPI/HDF5/NetCDF stack itself.
+The suite is in [`tests/`](tests/) and runs with `python -m pytest tests` from the clone root. `tests/test_local.py` needs no launcher: it covers domain decomposition, the extended-fixed-point digit kernel (against an executable copy of the original algorithm), the reproducible product, the buffer pool, and the progress bar. `tests/test_mpi.py` launches each script in `tests/mpi_cases/` with `mpiexec` on 1, 2, 3 and 4 ranks and compares reductions, scans, stencils, indexing, grouped and resampled reductions, two- and three-axis process grids, halo exchange, and file I/O with serial xarray references. The scripts exit non-zero if any rank records a mismatch. They skip when no launcher is found, honour `XRMPI_TEST_TIMEOUT` (seconds per script, default 600), and relax the parallel-NetCDF probe when the installed netCDF4 lacks parallel support (collective parallel output itself is not exercised in that case).
 
 ## References
 

@@ -14,7 +14,7 @@ import numpy as np
 import xarray as xr
 
 from ..mpi.mpi_init import MPI
-from ..mpp.ext_collectives import gather_v
+from ..mpp.ext_collectives import gather_v, materialize
 from ..mpp.ext_domains import dim_comm
 from ..mpp.mpp_do_update import (
     mpp_complete_update_domains,
@@ -458,7 +458,7 @@ def mpp_redistribute(
         if dest == rank:
             self_payload = payload
         else:
-            send_requests.append(comm.isend(payload, dest=dest))
+            send_requests.append(comm.isend(materialize(payload), dest=dest))
 
     # Use ``recv`` for pickled payloads because it probes size; ``irecv`` requires a
     # buffer-size guess.

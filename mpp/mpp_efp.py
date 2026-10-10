@@ -50,22 +50,47 @@ def _carry_overflow(digits: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
     return digits
 
 
+#: Elements handled per pass, so the temporaries stay in cache. Larger local
+#: axes are processed in slices of rows; the digits are exact integers, so the
+#: slicing cannot change the result.
+_EFP_CHUNK_ELEMENTS = 1 << 17
+
+_INV_SCALES = tuple(1.0 / scale for scale in _SCALES)
+
+
 def _to_digits(array: np.ndarray[Any, Any], axis: int) -> np.ndarray[Any, Any]:
     """Sum values into signed integer digits along ``axis``.
 
     Accumulates in blocks of :data:`_EFP_BLOCK` terms, renormalising after
     each, so an arbitrarily long local axis cannot overflow the accumulator.
+
+    Every scale is a power of two, so ``residual * (1 / scale)`` and
+    ``trunc`` are exact and give the same digit as ``sign * floor(|x| /
+    scale)``. A scale larger than every magnitude in the slice contributes
+    nothing, and the loop stops once the residual is exhausted, so typical
+    data touches three of the six digits.
     """
     values = np.moveaxis(np.asarray(array, dtype=np.float64), axis, 0)
     digits = np.zeros((_NUMINT, *values.shape[1:]), dtype=np.int64)
+    width = max(1, int(np.prod(values.shape[1:], dtype=np.int64)))
+    rows = max(1, min(_EFP_BLOCK, _EFP_CHUNK_ELEMENTS // width))
     for start in range(0, values.shape[0], _EFP_BLOCK):
         block = values[start : start + _EFP_BLOCK]
-        sign = np.where(block < 0.0, -1.0, 1.0)
-        residual = np.abs(block)
-        for n, scale in enumerate(_SCALES):
-            digit = np.floor(residual / scale)
-            digits[n] += (sign * digit).astype(np.int64).sum(axis=0)
-            residual -= digit * scale
+        for first in range(0, block.shape[0], rows):
+            residual = np.array(block[first : first + rows], dtype=np.float64)
+            if residual.size == 0:
+                continue
+            peak = max(float(residual.max()), -float(residual.min()))
+            for n, scale in enumerate(_SCALES):
+                if scale > peak:
+                    continue
+                scaled = residual * _INV_SCALES[n]
+                np.trunc(scaled, out=scaled)
+                digits[n] += scaled.astype(np.int64).sum(axis=0)
+                scaled *= scale
+                residual -= scaled
+                if n >= 2 and not residual.any():
+                    break
         _carry_overflow(digits)
     return digits
 

@@ -63,7 +63,7 @@ def _combine_sum_or_prod(
     scatter: tuple[Hashable, list[int]] | None = None,
 ) -> xr.DataArray:
     """Combine rank-local sum or product partials."""
-    if op_name(op) == "PROD":
+    if op_name(op) == "PROD" and value.dtype.kind != "c":
         result = _combine_prod(
             mpi_context,
             value,
@@ -80,7 +80,14 @@ def _combine_sum_or_prod(
             mpi_context,
             partial,
             op,
-            expect_dtype=partial_dtype(value.dtype.str, "sum", skipna),
+            # The reproducing product splits real magnitudes into exponents and
+            # mantissas; complex products take the plain MPI product instead,
+            # which is correct but not invariant to the rank count.
+            expect_dtype=partial_dtype(
+                value.dtype.str,
+                "prod" if op_name(op) == "PROD" else "sum",
+                skipna,
+            ),
             error=error,
             phase="MPI xarray sum/prod reduction",
             comm=comm,
@@ -134,7 +141,11 @@ def _combine_prod(
     if error is None and partial is not None:
         try:
             axes = tuple(value.dims.index(d) for d in dims)
-            fields = prod_decompose(np.asarray(value.values), axes)
+            fields = prod_decompose(
+                np.asarray(value.values),
+                axes,
+                skipna=skipna_enabled(value.dtype, skipna),
+            )
             fields_da = xr.DataArray(
                 fields,
                 dims=(_PROD_FIELD_DIM, *partial.dims),
@@ -341,10 +352,15 @@ def _combine_extreme(
 
     if error is None:
         try:
-            if use_skipna:
-                good = value.count(dim=dims, keep_attrs=False) > 0
+            # The local extreme is NaN exactly when nothing valid was seen
+            # (skipna) or any NaN was seen (no skipna), so validity follows from
+            # the partial and the input need not be scanned a second time. A
+            # slab with no elements along a reduced dimension holds the
+            # identity, which must not count as valid.
+            if any(int(value.sizes[d]) == 0 for d in dims if d in value.dims):
+                good = xr.zeros_like(partial, dtype=bool)
             else:
-                good = ~value.isnull().any(dim=dims, keep_attrs=False)
+                good = partial.notnull()
             safe_partial = partial.where(good, other=identity)
             if safe_partial.dtype != expect_dtype:
                 safe_partial = safe_partial.astype(expect_dtype, keep_attrs=True)
@@ -369,6 +385,10 @@ def _combine_extreme(
             if scatter is None:
                 send[0, values.size] = healthy_flag
                 send[1, values.size] = identity
+            else:
+                # reduce_scatter splits along an axis of the reduced array, so
+                # the buffer must keep that shape behind the leading row axis.
+                send = send.reshape((2, *values.shape))
         except BaseException as exc:
             error = exc
             send = None
@@ -847,7 +867,9 @@ def _first_last_local(
         index = mask.argmax(dim=dim)
     else:
         index = (size - 1) - mask.isel({dim: slice(None, None, -1)}).argmax(dim=dim)
-    return variable.isel({dim: index}, drop=True), mask.any(dim=dim)
+    # Vectorised indexing needs a concrete indexer; dask rejects a lazy one.
+    # The indexer has the reduced shape, so evaluating it is cheap.
+    return variable.isel({dim: index.compute()}, drop=True), mask.any(dim=dim)
 
 
 def _first_last_pick(

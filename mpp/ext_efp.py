@@ -47,6 +47,8 @@ def _moved_to_front(
 def prod_decompose(
     local: np.ndarray[Any, Any],
     axes: int | Sequence[int],
+    *,
+    skipna: bool = False,
 ) -> np.ndarray[Any, Any]:
     """Decompose a rank-local product into exactly summable integer fields.
 
@@ -63,6 +65,9 @@ def prod_decompose(
         Rank-local values.
     axes : int or sequence of int
         Local axes to reduce.
+    skipna : bool, default False
+        Treat NaN as the multiplicative identity instead of propagating it,
+        matching ``numpy.nanprod``.
 
     Returns
     -------
@@ -80,12 +85,15 @@ def prod_decompose(
     ordinary = ~(is_nan | is_inf | is_zero)
     # Non-ordinary factors contribute 1.0, whose frexp is (0.5, 1): the
     # log2 of -1 and the exponent of +1 cancel, leaving the product untouched.
-    magnitude = np.where(ordinary, np.abs(work), 1.0)
+    # Finite, non-zero data (the usual case) needs no substitution at all.
+    magnitude = (
+        np.abs(work) if ordinary.all() else np.where(ordinary, np.abs(work), 1.0)
+    )
 
     mantissa, exponent = np.frexp(magnitude)
     fields = np.empty((_PROD_FIELDS + _NUMINT, *work.shape[1:]), dtype=np.int64)
     fields[PROD_EXPONENT] = exponent.sum(axis=0, dtype=np.int64)
-    fields[PROD_NAN] = np.count_nonzero(is_nan, axis=0)
+    fields[PROD_NAN] = 0 if skipna else np.count_nonzero(is_nan, axis=0)
     fields[PROD_INF] = np.count_nonzero(is_inf, axis=0)
     fields[PROD_ZERO] = np.count_nonzero(is_zero, axis=0)
     fields[PROD_NEGATIVE] = np.count_nonzero(np.signbit(work) & ~is_nan, axis=0)
@@ -135,7 +143,13 @@ def prod_recombine(
     result = np.where(n_inf > 0, sign * np.inf, result)
     result = np.where((n_zero > 0) & (n_inf > 0), np.nan, result)
     result = np.where(n_nan > 0, np.nan, result)
-    return result if dtype is None else result.astype(dtype, copy=False)
+    if dtype is None:
+        return result
+    if np.dtype(dtype).kind in "iu":
+        # The log-domain product is within an ulp or two of the exact value;
+        # truncating 5.999999999999999 to 5 would be wrong, so round.
+        result = np.rint(result)
+    return result.astype(dtype, copy=False)
 
 
 def reproducing_prod(

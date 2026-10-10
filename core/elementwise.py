@@ -338,18 +338,25 @@ def _fill_scan(
     *,
     forward: bool,
 ) -> xr.Dataset | xr.DataArray:
-    """Unbounded ffill/bfill core: an exclusive-scan last-value-seen carry."""
-    comm = _dim_comm(meta, dim, mpi_context)
-    edge_index = -1 if forward else 0
+    """Unbounded ffill/bfill core: per-element carry from the neighbouring ranks.
 
-    def _local() -> tuple[xr.Dataset | xr.DataArray, Any, bool]:
-        """Return this rank's locally filled array and boundary value."""
+    Each rank fills locally, then every position still missing at its edge
+    takes the nearest valid value held by a rank on the upstream side. The
+    carry is resolved per element: a column that is missing at one rank's
+    edge must not hide valid edges of the other columns, nor stop an
+    earlier rank's value from passing through.
+    """
+    comm = _dim_comm(meta, dim, mpi_context)
+
+    def _local() -> tuple[xr.Dataset | xr.DataArray, Any]:
+        """Return this rank's locally filled array and its boundary slice."""
+        if int(value.sizes[dim]) == 0:
+            return value, None
         local_filled = value.ffill(dim) if forward else value.bfill(dim)
-        edge_slice = local_filled.isel({dim: edge_index}, drop=True)
-        has_valid = bool(edge_slice.notnull().all())
-        # Materialize edge slices before object-based scans to avoid pickling lazy Dask
-        # graphs.
-        return local_filled, edge_slice.load(), has_valid
+        edge_slice = local_filled.isel({dim: -1 if forward else 0}, drop=True)
+        # Materialize edge slices before object-based collectives to avoid
+        # pickling lazy Dask graphs.
+        return local_filled, edge_slice.load()
 
     local_or_none, error = guarded(_local)
     mpi_context.raise_if_error(
@@ -358,26 +365,21 @@ def _fill_scan(
         signature=("fill_scan", str(dim), forward),
         comm=comm,
     )
-    local_filled, edge_slice, has_valid = local_or_none
+    local_filled, edge_slice = local_or_none
 
-    def _last_valid(carry: Any, current: Any) -> Any:
-        """Combine two (has_valid, edge_slice) pairs, keeping the more recent valid
-        one."""
-        return current if current[0] else carry
+    edges = comm.allgather(edge_slice)
+    rank = comm.rank
+    # Upstream ranks ordered from the nearest to the farthest.
+    upstream = edges[:rank][::-1] if forward else edges[rank + 1 :]
+    carry = None
+    for edge in upstream:
+        if edge is None:
+            continue
+        carry = edge if carry is None else carry.fillna(edge)
 
-    # Use ``EXSCAN`` for forward fill and reverse communicator numbering for backward
-    # fill.
-    scan_comm = comm if forward else comm.Split(0, comm.size - 1 - comm.rank)
-    try:
-        carry_in_pair = scan_comm.exscan((has_valid, edge_slice), op=_last_valid)
-    finally:
-        if scan_comm is not comm:
-            scan_comm.Free()
-    carry_in = None if carry_in_pair is None else carry_in_pair[1]
-
-    if carry_in is None:
+    if carry is None:
         return local_filled
-    return local_filled.fillna(carry_in)
+    return local_filled.fillna(carry)
 
 
 #: Source points each interpolation method needs on either side of a target.

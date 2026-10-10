@@ -9,6 +9,7 @@ Names here carry no ``mpp_`` prefix because they are not FMS routines.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cache
@@ -162,13 +163,27 @@ def define_cartesian_domain(
     comm: MPI.Intracomm,
     dims: Sequence[str],
     sizes: Mapping[str, int],
+    grid_shape: Sequence[int] | None = None,
 ) -> CartesianDomain:
     """Build a rank's Cartesian topology for a multi-dimensional partition.
+
+    Parameters
+    ----------
+    comm : mpi4py.MPI.Intracomm
+        Communicator the partition spans.
+    dims : sequence of str
+        Partition dimension names.
+    sizes : mapping of str to int
+        Global size of each partition dimension.
+    grid_shape : sequence of int, optional
+        Process-grid shape the data is already laid out on. Defaults to the
+        layout :func:`_define_layout_nd` would choose for ``sizes``.
 
     Raises
     ------
     ValueError
-        If fewer than two dimensions are given.
+        If fewer than two dimensions are given, or ``grid_shape`` does not
+        multiply to the communicator size.
 
     """
     if len(dims) < 2:
@@ -177,7 +192,15 @@ def define_cartesian_domain(
         )
 
     extents = [int(sizes[dim]) for dim in dims]
-    grid_shape = _define_layout_nd(extents, comm.size)
+    if grid_shape is None:
+        grid_shape = _define_layout_nd(extents, comm.size)
+    else:
+        grid_shape = tuple(int(n) for n in grid_shape)
+        if len(grid_shape) != len(dims) or math.prod(grid_shape) != comm.size:
+            raise ValueError(
+                f"grid_shape {grid_shape!r} does not fit {len(dims)} dimensions "
+                + f"on {comm.size} ranks."
+            )
 
     cart_comm = comm.Create_cart(
         dims=list(grid_shape),
@@ -207,12 +230,24 @@ def get_cartesian_domain(
     comm: MPI.Intracomm,
     dims: Sequence[str],
     sizes: Mapping[str, int],
+    grid_shape: Sequence[int] | None = None,
 ) -> CartesianDomain:
-    """Return (building and caching once) a rank's Cartesian topology."""
+    """Return (building and caching once) a rank's Cartesian topology.
+
+    Pass ``grid_shape`` whenever the data's actual layout is known (it is
+    recorded in the metadata and domain ``cart`` descriptor). Re-deriving the
+    layout from ``sizes`` alone gives a different grid once an indexing
+    operation has changed the sizes, and collectives on the wrong
+    sub-communicator then mix ranks holding different slabs.
+    """
     dims = tuple(dims)
     # Include sizes in the cache key so same-named dimensions with different extents
-    # cannot collide.
-    cache_key = (dims, tuple(int(sizes[d]) for d in dims))
+    # cannot collide, and the grid so one size can carry several layouts.
+    cache_key = (
+        dims,
+        tuple(int(sizes[d]) for d in dims),
+        None if grid_shape is None else tuple(int(n) for n in grid_shape),
+    )
     cache = comm.Get_attr(_topology_keyval())
     if cache is None:
         cache = {}
@@ -220,7 +255,7 @@ def get_cartesian_domain(
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-    topology = define_cartesian_domain(comm, dims, sizes)
+    topology = define_cartesian_domain(comm, dims, sizes, grid_shape)
     cache[cache_key] = topology
     return topology
 
@@ -250,17 +285,17 @@ def dim_comm(
     """
     if isinstance(source, Domain):
         dims, sizes, comm = source.dims, source.global_sizes, source.comm
-        cartesian = source.cart is not None
+        cart = source.cart
     else:
         if mpi_context is None:
             raise TypeError("dim_comm needs an MPIContext for metadata input.")
         dims, sizes = source["dims"], source["global_sizes"]
         comm = mpi_context.comm
-        cartesian = "cart" in source
+        cart = source.get("cart")
 
-    if len(dims) <= 1 or not cartesian:
+    if len(dims) <= 1 or cart is None:
         return cast("Comm", comm)
-    return get_cartesian_domain(comm, dims, sizes).sub_comm((dim,))
+    return get_cartesian_domain(comm, dims, sizes, cart["grid_shape"]).sub_comm((dim,))
 
 
 def slice_compute_domain(

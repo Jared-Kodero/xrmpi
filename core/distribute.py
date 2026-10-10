@@ -40,7 +40,9 @@ if TYPE_CHECKING:
     from ..mpi.context import MPIContext
 
 
-_DISTRIBUTE_TAG = 0x6469_7374  # b"dist" as an int, easy to spot in a trace
+# MPI only guarantees tags up to 32767 (MPI_TAG_UB may be as low as that), and
+# MPICH rejects anything above 2**29 - 1, so keep the tag within the guaranteed range.
+_DISTRIBUTE_TAG = 0x6469  # b"di" as an int, easy to spot in a trace
 
 
 def _resolve_single_dim(

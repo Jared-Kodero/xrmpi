@@ -317,15 +317,19 @@ def new_dataarray(
     Examples
     --------
     Run on every rank, for example with ``mpirun -n 4 python script.py``.
-    ``fill`` receives one array of global indices per dimension, as in
-    :func:`numpy.fromfunction`, and each rank evaluates it only on its own
-    slice of ``time``:
+    ``fill`` receives the global ``(start, stop)`` bounds of the rank's slice
+    of each partition dimension, in the order of ``dim``, and returns an array
+    of the local shape. Each rank evaluates it only on its own slice of
+    ``time``:
 
     >>> import numpy as np
     >>> import pandas as pd
     >>> import xrmpi as xm
-    >>> def fill(t, y, x):
-    ...     # Hourly air temperature in K from global grid indices.
+    >>> def fill(start, stop):
+    ...     # Hourly air temperature in K for global hours start to stop.
+    ...     t = np.arange(start, stop)[:, None, None]
+    ...     y = np.arange(29)[None, :, None]
+    ...     x = np.arange(33)[None, None, :]
     ...     lat = 40.5 + 0.25 * y
     ...     diurnal = 5.0 * np.sin(2.0 * np.pi * (t % 24) / 24.0)
     ...     return 300.0 - 0.6 * lat + diurnal + 0.0 * x
@@ -412,21 +416,29 @@ def new_dataset(
     Examples
     --------
     Run on every rank, for example with ``mpirun -n 4 python script.py``.
-    Each ``fill`` receives one array of global indices per dimension of its
-    variable, as in :func:`numpy.fromfunction`, and each rank evaluates it
-    only on its own slice of ``time``:
+    Each ``fill`` receives the global ``(start, stop)`` bounds of the rank's
+    slice of every partition dimension its variable contains, in the order of
+    ``dim``, and returns an array of the local shape. A variable that contains
+    no partition dimension is filled by calling ``fill()`` without arguments.
+    Each rank evaluates ``fill`` only on its own slice of ``time``:
 
     >>> import numpy as np
     >>> import pandas as pd
     >>> import xrmpi as xm
-    >>> def fill_tas(t, y, x):
-    ...     # Hourly air temperature in K from global grid indices.
+    >>> def fill_tas(start, stop):
+    ...     # Hourly air temperature in K for global hours start to stop.
+    ...     t = np.arange(start, stop)[:, None, None]
+    ...     y = np.arange(29)[None, :, None]
+    ...     x = np.arange(33)[None, None, :]
     ...     lat = 40.5 + 0.25 * y
     ...     diurnal = 5.0 * np.sin(2.0 * np.pi * (t % 24) / 24.0)
     ...     return 300.0 - 0.6 * lat + diurnal + 0.0 * x
     ...
-    >>> def fill_pr(t, y, x):
+    >>> def fill_pr(start, stop):
     ...     # Precipitation flux in kg m-2 s-1, peaking in the afternoon.
+    ...     t = np.arange(start, stop)[:, None, None]
+    ...     y = np.arange(29)[None, :, None]
+    ...     x = np.arange(33)[None, None, :]
     ...     cycle = 1.0 + np.sin(2.0 * np.pi * ((t % 24) - 9.0) / 24.0)
     ...     return 1.0e-5 * cycle**2 * (1.0 + 0.02 * y) + 0.0 * x
     ...

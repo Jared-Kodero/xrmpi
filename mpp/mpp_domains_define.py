@@ -119,7 +119,12 @@ def mpp_define_domains(
     min_partition_size : int or mapping, optional
         Minimum non-empty local extent.
     rank : int, optional
-        Rank whose domain to compute; defaults to the caller.
+        Rank whose domain to compute. By default the caller's own domain is
+        built, which for more than one dimension creates (or reuses) the
+        Cartesian communicator and is therefore collective over the
+        communicator. An explicit ``rank`` is computed arithmetically with no
+        communication, so it is safe to call on a subset of ranks, for example
+        on the root alone while it cuts pieces for every rank.
 
     Returns
     -------
@@ -155,32 +160,32 @@ def mpp_define_domains(
 
     sizes = {d: int(global_sizes[d]) for d in dim_tuple}
 
-    if target_rank == comm.rank:
-        # Imported here: ext_domains builds on this module, so importing it
-        # at module scope would close a cycle.
-        from .ext_domains import get_cartesian_domain
+    # Imported here: ext_domains builds on this module, so importing it at
+    # module scope would close a cycle.
+    from .ext_domains import _define_layout_nd, get_cartesian_domain
 
+    if rank is None:
         topology = get_cartesian_domain(comm, dim_tuple, sizes)
         grid_shape = topology.grid_shape
-        starts = {d: topology.bounds[d][0] for d in dim_tuple}
-        stops = {d: topology.bounds[d][1] for d in dim_tuple}
-        cart = topology.as_meta_cart()
+        coords = topology.coords
     else:
-        grid_shape = mpp_define_layout(
-            sizes[dim_tuple[0]], sizes[dim_tuple[1]], comm.size
-        )
+        # No communication: Create_cart is collective, and a caller that asks
+        # for a specific rank may be running on one rank only.
+        grid_shape = _define_layout_nd([sizes[d] for d in dim_tuple], comm.size)
         coords = tuple(int(c) for c in np.unravel_index(target_rank, grid_shape))
-        starts, stops = {}, {}
-        for axis, d in enumerate(dim_tuple):
-            s, e = mpp_compute_extent(
-                sizes[d], coords[axis], grid_shape[axis], _min_chunk(d)
-            )
-            starts[d], stops[d] = s, e
-        cart = {
-            "grid_shape": grid_shape,
-            "coords": coords,
-            "periods": (False,) * len(dim_tuple),
-        }
+
+    # The topology cache is keyed without min_partition_size, so the bounds are
+    # always computed here, where the minimum is known.
+    starts, stops = {}, {}
+    for axis, d in enumerate(dim_tuple):
+        starts[d], stops[d] = mpp_compute_extent(
+            sizes[d], coords[axis], grid_shape[axis], _min_chunk(d)
+        )
+    cart = {
+        "grid_shape": grid_shape,
+        "coords": coords,
+        "periods": (False,) * len(dim_tuple),
+    }
 
     return Domain(
         dims=dim_tuple,

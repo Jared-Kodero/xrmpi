@@ -153,7 +153,7 @@ class MPIXarray:
     -----
     Distribution metadata is stored on ``.meta`` and attached to xarray attributes
     only while an engine operation is executing. Replicated input is assumed to be
-    present on every rank; use :func:`~.constructors.distribute_data` for
+    present on every rank; use :func:`~.io.partition` for
     root-owned input.
 
     """
@@ -424,7 +424,7 @@ class MPIXarray:
         -------
         MPIXarray
             ``self``, mutated in place so this chains onto a constructor
-            call, e.g. ``xrmpi.create_distributed_dataarray(...).load()``.
+            call, e.g. ``xrmpi.new_dataarray(...).load()``.
 
         """
         self.data = self.data.load()

@@ -46,4 +46,12 @@ packages = ["xrmpi", "xrmpi.core", "xrmpi.mpi", "xrmpi.mpp"]
 package-dir = { xrmpi = "." }
 
 [tool.setuptools.exclude-package-data]
-"*" = ["env/*", "test/*", "__pycache__/*"]
+"*" = ["env/*", "test/*", "tests/*", "__pycache__/*"]
+
+[tool.ruff.lint.per-file-ignores]
+# The case scripts build closures that are called inside the loop that defines
+# them, and report any exception as a recorded failure instead of aborting.
+"tests/**" = ["B023", "BLE001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

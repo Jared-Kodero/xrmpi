@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from .ext_domains import dim_comm
 from .mpp_domains import Domain, DomainMismatchError
 
 
@@ -35,8 +36,9 @@ def mpp_global_field(
     axis : int
         Array axis corresponding to ``dim``.
     root : int, optional
-        Rank receiving the result. None gathers to every rank, which is what
-        FMS does by default.
+        Rank receiving the result, numbered within the communicator that
+        varies along ``dim`` (the whole communicator for a one-axis domain).
+        None gathers to every rank, which is what FMS does by default.
 
     Returns
     -------
@@ -48,7 +50,9 @@ def mpp_global_field(
     DomainMismatchError
         If the gathered slices do not tile the axis exactly.
     """
-    comm = domain.comm
+    # In a multi-axis domain only the ranks sharing this rank's position on
+    # the other axes tile ``dim``; gathering over all of them would overlap.
+    comm = dim_comm(domain, dim)
     piece = (domain.starts[dim], domain.stops[dim], np.asarray(field))
     pieces = comm.allgather(piece) if root is None else comm.gather(piece, root=root)
     if pieces is None:

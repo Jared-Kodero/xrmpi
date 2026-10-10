@@ -207,7 +207,7 @@ def mpp_reduction_plan(
 
     partition_dims: tuple[Hashable, ...] = () if meta is None else meta["dims"]
     grid_shape_by_dim: dict[Hashable, int] = {}
-    if meta is not None and "cart" in meta:
+    if meta is not None and meta.get("cart") is not None:
         grid_shape_by_dim = dict(
             zip(meta["dims"], meta["cart"]["grid_shape"], strict=True)
         )
@@ -270,7 +270,10 @@ def mpp_reduction_plan(
             tuple(str(dim) for dim in dims),
             tuple(
                 (
-                    str(entry.name),
+                    # A DataArray's name may be derived from its local dask graph
+                    # and so differ between ranks; only Dataset variable names
+                    # are rank-independent.
+                    "" if isinstance(value, xr.DataArray) else str(entry.name),
                     tuple(str(dim) for dim in entry.dims),
                     entry.distributed,
                     str(entry.dtype),
@@ -292,10 +295,13 @@ def mpp_resolve_comm(
 ) -> MPI.Comm:
     """Return the communicator a plan entry's collective should use."""
     axes = frozenset(comm_axes)
-    if meta is None or not axes or "cart" not in meta or len(meta["dims"]) <= 1:
+    if meta is None or not axes or meta.get("cart") is None or len(meta["dims"]) <= 1:
         return mpi_context.comm
     topology = get_cartesian_domain(
-        mpi_context.comm, meta["dims"], meta["global_sizes"]
+        mpi_context.comm,
+        meta["dims"],
+        meta["global_sizes"],
+        meta["cart"]["grid_shape"],
     )
     return topology.sub_comm(axes)
 

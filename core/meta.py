@@ -612,14 +612,35 @@ def localize_coord(spec: Any, global_size: int, start: int, stop: int) -> Any:
     return (coord_dims, coord_array, *rest)
 
 
+def _fill_local(
+    fn: Callable[..., Any], shape: tuple[int, ...], dtype: Any, *args: Any
+) -> np.ndarray[Any, Any]:
+    """Evaluate ``fn(*args)`` and enforce the declared local shape and dtype.
+
+    Dask takes the declared dtype on trust, so a fill returning another dtype
+    would leave array metadata and computed chunks disagreeing.
+    """
+    value = np.asarray(fn(*args), dtype=dtype)
+    if value.shape != shape:
+        raise ValueError(
+            f"fill returned shape {value.shape}; expected the local shape {shape}."
+        )
+    return value
+
+
 def delayed_local(
     fn: Callable[..., Any], args: tuple[Any, ...], shape: tuple[int, ...], dtype: Any
 ) -> Any:
-    """Wrap ``fn(*args)`` as one rank's own slice, not yet computed."""
+    """Wrap ``fn(*args)`` as one rank's own slice, not yet computed.
+
+    The result is cast to ``dtype`` and must have exactly ``shape``.
+    """
     import dask
     import dask.array as dask_array
 
-    return dask_array.from_delayed(dask.delayed(fn)(*args), shape=shape, dtype=dtype)
+    return dask_array.from_delayed(
+        dask.delayed(_fill_local)(fn, shape, dtype, *args), shape=shape, dtype=dtype
+    )
 
 
 _SHORT_PARTITION_WARNED: set[tuple[str, int, int]] = set()

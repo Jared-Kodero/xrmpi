@@ -140,7 +140,7 @@ Parallel reads and writes need the NetCDF-4/HDF5 format; check an input with `nc
 
 ## Building data without a file
 
-`new_dataarray` evaluates a fill function only on each rank's slice, so large synthetic fields never exist on a single rank. `partition` instead starts from an object held on one rank:
+`new_dataarray` evaluates a fill function only on each rank's slice, so large synthetic fields never exist on a single rank. The function receives the global `(start, stop)` bounds of the rank's slice of each partition dimension, in the order given by `dim`, and returns an array of the local shape. `partition` instead starts from an object held on one rank:
 
 ```python
 import numpy as np
@@ -151,8 +151,11 @@ import xrmpi as xm
 mpi = xm.MPIContext()
 
 
-def fill(t, y, x):
-    """Return hourly air temperature in K from global grid indices."""
+def fill(start, stop):
+    """Return hourly air temperature in K for global hours start to stop."""
+    t = np.arange(start, stop)[:, None, None]
+    y = np.arange(29)[None, :, None]
+    x = np.arange(33)[None, None, :]
     lat = 40.5 + 0.25 * y
     diurnal = 5.0 * np.sin(2.0 * np.pi * (t % 24) / 24.0)
     return 300.0 - 0.6 * lat + diurnal + 0.0 * x

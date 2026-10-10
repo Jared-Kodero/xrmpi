@@ -257,6 +257,9 @@ def _combine_mean(
     result = result.where(global_count != 0)
     if result.dtype != target:
         result = result.astype(target, keep_attrs=True)
+    # xarray keeps a name through arithmetic only when both operands share it,
+    # and the count is unnamed, so restore the name xarray's own mean keeps.
+    result.name = global_sum.name
     return result
 
 
@@ -418,6 +421,11 @@ def _combine_extreme(
         template = template.isel({target: slice(start, stop)})
     else:
         recv = _mpp_reduce(send, op, resolved_comm)
+        # Without a scatter, ``send`` carries one trailing health-flag column.
+        # The signature agreement above already reports peer failures, and the
+        # single-rank branch of the check at the top is skipped for a
+        # communicator of size 1, so drop the flag column here.
+        recv = recv[:, : template.size]
 
     return _finish_extreme(recv, template, expect_dtype, minimum=minimum, flip=flip)
 

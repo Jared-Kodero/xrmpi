@@ -1,13 +1,3 @@
-"""Generate conda activate/deactivate hooks for the parallel I/O stack.
-
-The activation hook loads the MPI and NetCDF modules that the extensions were
-built against and exports the matching build variables. The deactivation hook
-restores the previous state exactly, unloading only the modules that the
-activation hook itself loaded.
-
-Replaces a nested bash heredoc; the quoting is far easier to keep correct here.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -20,7 +10,6 @@ HOOK_NAME = "mpi-netcdf.sh"
 
 # Variables the activation hook overrides and the deactivation hook restores.
 SAVED_VARS = (
-    "HDF5_USE_FILE_LOCKING",
     "LD_LIBRARY_PATH",
     "PATH",
     "HDF5_INCDIR",
@@ -114,14 +103,13 @@ fi
 
 {loads}
 # Applied after module loading so module init cannot overwrite them.
-export HDF5_USE_FILE_LOCKING="FALSE"
 export HDF5_DIR={shlex.quote(hdf5_dir)}
 export NETCDF4_DIR={shlex.quote(netcdf4_dir)}
 unset HDF5_INCDIR HDF5_INCLUDEDIR HDF5_LIBDIR HDF5_PKGCONFIG_NAME
 export PATH={shlex.quote(str(Path(mpicc).parent))}:"${{PATH:-}}"
 _{prefix}_LIBDIR={shlex.quote(library_path)}
 _{prefix}_LDPATH="${{LD_LIBRARY_PATH:+:${{LD_LIBRARY_PATH}}}}"
-export LD_LIBRARY_PATH="${{_{prefix}_LIBDIR}}${{_{prefix}_LDPATH}}"
+export LD_LIBRARY_PATH="${{_{prefix}_LIBDIR}}{{_{prefix}_LDPATH}}"
 unset _{prefix}_LDPATH
 unset _{prefix}_LIBDIR
 

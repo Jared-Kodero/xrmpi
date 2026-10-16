@@ -80,7 +80,7 @@ printf 'Python: %s\nMPI module: %s\nmpicc: %s\nHDF5: %s\nNetCDF-C: %s\n' \
     --netcdf4-dir "$NETCDF4_DIR" \
     --hdf5-libdir "$hdf5_libdir" \
     --mpicc "$MPICC" \
-    --library-path "$library_path"
+    --library-path "$hdf5_libdir"
 
 export CC="$MPICC"
 export HDF5_MPI=ON

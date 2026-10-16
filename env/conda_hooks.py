@@ -109,7 +109,7 @@ unset HDF5_INCDIR HDF5_INCLUDEDIR HDF5_LIBDIR HDF5_PKGCONFIG_NAME
 export PATH={shlex.quote(str(Path(mpicc).parent))}:"${{PATH:-}}"
 _{prefix}_LIBDIR={shlex.quote(library_path)}
 _{prefix}_LDPATH="${{LD_LIBRARY_PATH:+:${{LD_LIBRARY_PATH}}}}"
-export LD_LIBRARY_PATH="${{_{prefix}_LIBDIR}}{{_{prefix}_LDPATH}}"
+export LD_LIBRARY_PATH="${{_{prefix}_LIBDIR}}${{_{prefix}_LDPATH}}"
 unset _{prefix}_LDPATH
 unset _{prefix}_LIBDIR
 

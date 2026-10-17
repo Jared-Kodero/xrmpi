@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from .ext_collectives import gather_v
 from .ext_domains import dim_comm
 from .mpp_domains import Domain, DomainMismatchError
 
@@ -53,10 +54,11 @@ def mpp_global_field(
     # In a multi-axis domain only the ranks sharing this rank's position on
     # the other axes tile ``dim``; gathering over all of them would overlap.
     comm = dim_comm(domain, dim)
-    piece = (domain.starts[dim], domain.stops[dim], np.asarray(field))
-    pieces = comm.allgather(piece) if root is None else comm.gather(piece, root=root)
-    if pieces is None:
+    bounds = comm.allgather((domain.starts[dim], domain.stops[dim]))
+    values = gather_v(np.asarray(field), comm, root=root)
+    if values is None:
         return None
+    pieces = [(*span, block) for span, block in zip(bounds, values, strict=True)]
 
     cursor = 0
     ordered = sorted(pieces, key=lambda item: item[0])

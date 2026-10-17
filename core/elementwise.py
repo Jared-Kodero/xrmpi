@@ -110,13 +110,6 @@ def mpp_where(
     if meta is not None and drop:
         raise ValueError("drop=True is unsupported for distributed data.")
 
-    _agree(
-        mpi_context,
-        (
-            "where",
-            None if meta is None else (str(meta["dim"]), int(meta["global_size"])),
-        ),
-    )
     result = value.where(cond) if other is _UNSET else value.where(cond, other)
     if meta is None:
         return result
@@ -1046,12 +1039,8 @@ def _align_replicated(
                 sliced, "indexes", {}
             ):
                 continue
-            try:
-                xr.align(partner, sliced, join="exact")
-            except (ValueError, KeyError) as exc:
-                raise ValueError(
-                    f"Operand {dim!r} coordinates do not match this rank."
-                ) from exc
+            if not _labels_match(partner, sliced, dim):
+                raise ValueError(f"Operand {dim!r} coordinates do not match this rank.")
 
     return reattach_meta(sliced, meta)
 
@@ -1148,13 +1137,9 @@ def mpp_align(
         and isinstance(right, (xr.Dataset, xr.DataArray))
         and dim in getattr(left, "indexes", {})
         and dim in getattr(right, "indexes", {})
+        and not _labels_match(left, right, dim)
     ):
-        try:
-            xr.align(left, right, join="exact")
-        except (ValueError, KeyError) as exc:
-            raise ValueError(
-                f"Cannot align {dim!r}: coordinate labels differ."
-            ) from exc
+        raise ValueError(f"Cannot align {dim!r}: coordinate labels differ.")
 
     return (
         mpp_repartition(
@@ -1168,6 +1153,17 @@ def mpp_align(
             log_partitions=log_partitions,
         ),
     )
+
+
+def _labels_match(
+    left: xr.Dataset | xr.DataArray, right: xr.Dataset | xr.DataArray, dim: Hashable
+) -> bool:
+    """Whether both objects carry equal index labels along ``dim``.
+
+    Comparing the one index replaces ``xr.align(..., join="exact")``, which copies
+    both objects to check every shared index.
+    """
+    return left.get_index(dim).equals(right.get_index(dim))
 
 
 def mpp_check_operands_distribution(
@@ -1225,12 +1221,10 @@ def mpp_check_operands_distribution(
             reference_indexed = dim in getattr(reference, "indexes", {})
             other_indexed = dim in getattr(other, "indexes", {})
             if reference_indexed and other_indexed:
-                try:
-                    xr.align(reference, other, join="exact")
-                except (ValueError, KeyError) as exc:
+                if not _labels_match(reference, other, dim):
                     raise ValueError(
                         f"Operand {dim!r} coordinates do not match this rank."
-                    ) from exc
+                    )
             elif mpi_context.comm.size > 1:
                 # Without coordinates, equal local lengths cannot prove cross-rank
                 # alignment; reject the ambiguous case.
@@ -1290,11 +1284,9 @@ def check_partition_preserved(
             isinstance(reference, (xr.Dataset, xr.DataArray))
             and dim in getattr(reference, "indexes", {})
             and dim in getattr(result, "indexes", {})
+            and not _labels_match(reference, result, dim)
         ):
-            try:
-                xr.align(reference, result, join="exact")
-            except (ValueError, KeyError) as exc:
-                raise ValueError(f"Callable changed {dim!r} coordinates.") from exc
+            raise ValueError(f"Callable changed {dim!r} coordinates.")
 
 
 def mpp_apply(
@@ -1345,20 +1337,6 @@ def _apply_generic(
     """Run the shared partition-preserving callable path."""
     meta, reference = mpp_check_operands_distribution(
         mpi_context, (*args, *kwargs.values())
-    )
-
-    _agree(
-        mpi_context,
-        (
-            "apply",
-            getattr(func, "__name__", repr(func)),
-            None
-            if meta is None
-            else (
-                tuple(str(d) for d in meta["dims"]),
-                tuple(int(meta["global_sizes"][d]) for d in meta["dims"]),
-            ),
-        ),
     )
 
     result = func(*args, **kwargs)

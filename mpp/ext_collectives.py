@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ..mpi.mpi_init import MPI
+from .mpp import MPI_REDUCIBLE_KINDS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -73,15 +74,10 @@ def partition_offsets(comm: MPI.Comm, local_length: int) -> tuple[int, int, int]
     tuple[int, int, int]
         Global size and this rank's half-open ownership bounds.
     """
-    length = np.array([int(local_length)], dtype=np.int64)
-    total = np.empty_like(length)
-    comm.Allreduce(length, total, op=MPI.SUM)
-    prefix = np.zeros_like(length)
-    comm.Exscan(length, prefix, op=MPI.SUM)
-    if comm.rank == 0:
-        prefix[0] = 0  # Exscan leaves rank 0's receive buffer undefined.
-    start = int(prefix[0])
-    return int(total[0]), start, start + int(length[0])
+    lengths = np.empty(comm.size, dtype=np.int64)
+    comm.Allgather(np.array([int(local_length)], dtype=np.int64), lengths)
+    start = int(lengths[: comm.rank].sum())
+    return int(lengths.sum()), start, start + int(lengths[comm.rank])
 
 
 def materialize(obj: Any) -> Any:
@@ -127,6 +123,23 @@ def gather_v(
         ``root`` is given.
     """
     local = materialize(local)
+    if isinstance(local, np.ndarray) and local.dtype.kind in MPI_REDUCIBLE_KINDS:
+        shapes = comm.allgather(local.shape)
+        sizes = [int(np.prod(shape)) for shape in shapes]
+        send = np.ascontiguousarray(local).reshape(-1)
+        recv = np.empty(sum(sizes), dtype=local.dtype)
+        if root is None:
+            comm.Allgatherv(send, [recv, sizes])
+        else:
+            comm.Gatherv(send, [recv, sizes], root=root)
+            if comm.rank != root:
+                return None
+        return [
+            part.reshape(shape)
+            for part, shape in zip(
+                np.split(recv, np.cumsum(sizes)[:-1]), shapes, strict=True
+            )
+        ]
     if root is None:
         return comm.allgather(local)
     return comm.gather(local, root=root)

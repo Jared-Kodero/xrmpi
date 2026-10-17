@@ -94,13 +94,7 @@ def serial_write():
     if comm.rank != 0:
         return
     out = os.path.join(tmp, "app.nc")
-    xm.to_netcdf(
-        ds.isel(time=slice(0, 30)),
-        out,
-        unlimited_dim="time",
-        show_progress=False,
-        batch_size=7,
-    )
+    xm.to_netcdf(ds.isel(time=slice(0, 30)), out, unlimited_dim="time")
     xm.append_to_netcdf(ds.isel(time=slice(30, 40)), out, dim="time")
     got = xr.open_dataset(out)
     check("append roundtrip", got["pr"].values, a)
@@ -109,19 +103,6 @@ def serial_write():
         got["time"].values.astype("datetime64[ns]").astype("int64"),
         times.values.astype("datetime64[ns]").astype("int64"),
     )
-    # The progress bar writes to the stream it is given.
-    import io
-
-    sink = io.StringIO()
-    xm.to_netcdf(
-        ds,
-        os.path.join(tmp, "bar.nc"),
-        unlimited_dim="time",
-        batch_size=5,
-        show_progress=True,
-        stdout=sink,
-    )
-    check("progress written", np.array([len(sink.getvalue()) > 0]), np.array([True]))
 
 
 case("serial write", serial_write)

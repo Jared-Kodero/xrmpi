@@ -38,8 +38,11 @@ from .meta import (
     mpp_should_log_partitions,
     mpp_update_meta,
     set_save_chunks,
+    strip_mpi_meta,
 )
-from .netcdf import append_to_netcdf, mpp_to_netcdf_parallel, to_netcdf_serial
+from .netcdf import mpp_to_netcdf_parallel
+from .netcdf_append import append_to_netcdf
+from .netcdf_backend import default_encoding
 
 __all__ = [
     "append_to_netcdf",
@@ -563,120 +566,130 @@ def to_netcdf(
     unlimited_dim: str | Iterable[str] | None = None,
     partition_dim: str | None = None,
     parallel: bool = False,
-    batch_size: int = 24,
+    batch_size: int | None = None,
     format: str = "NETCDF4",
     shuffle: bool = True,
     zlib: bool = True,
     complevel: int = 4,
-    show_progress: bool = True,
+    show_progress: bool | None = None,
     stdout: Any = None,
     chunks: Mapping[str, Iterable[int]] | None = None,
     hints: str | None = None,
     nofill: bool = True,
     allow_serial: bool = False,
+    *,
+    encoding: Mapping[Hashable, Mapping[str, Any]] | None = None,
+    unlimited_dims: str | Iterable[str] | None = None,
 ) -> None:
     """Write an xarray object to NetCDF.
+
+    Serial output is :meth:`xarray.Dataset.to_netcdf`. Parallel output partitions
+    root-owned input across the ranks, then writes every rank's hyperslabs with MPI-IO.
 
     Parameters
     ----------
     data : xarray.Dataset or xarray.DataArray
-        Object to write.
+        Object to write: complete on rank 0 (other ranks are ignored), or distributed.
     file : str or os.PathLike
         Output path.
     mpi_context : MPIContext or mpi4py.MPI.Intracomm, optional
         MPI context or communicator.
     unlimited_dim : str or iterable of str, optional
-        Unlimited dimension names.
+        Alias of ``unlimited_dims``.
     partition_dim : str, optional
-        MPI partition dimension.
+        Dimension used to partition root-owned input.
     parallel : bool, default False
         Use MPI-parallel NetCDF-4 output.
-    batch_size : int, default 24
-        Slices written per serial append.
     format : str, default "NETCDF4"
         NetCDF format for serial output.
     shuffle, zlib : bool, default True
-        HDF5 filters.
+        HDF5 filters applied to numeric data variables.
     complevel : int, default 4
         Compression level.
-    show_progress : bool, default True
-        Display serial write progress.
-    stdout : Any, optional
-        Progress output stream.
     chunks : mapping, optional
-        Explicit NetCDF chunk shapes.
+        Explicit NetCDF chunk shapes per variable.
     hints : str, optional
         Semicolon-separated MPI-IO ``key=value`` hints.
     nofill : bool, default True
         Disable NetCDF pre-filling in parallel mode.
     allow_serial : bool, default False
         Permit the parallel writer with one MPI rank.
+    encoding : mapping, optional
+        Per-variable encoding, with the conventions of xarray's ``to_netcdf``.
+    unlimited_dims : str or iterable of str, optional
+        Unlimited dimensions, as in xarray.
+    batch_size, show_progress, stdout
+        Deprecated and ignored; serial output is written by xarray.
     """
-
     if not isinstance(data, (xr.Dataset, xr.DataArray)):
         raise TypeError("data must be an xarray.Dataset or xarray.DataArray")
+    if unlimited_dims is None:
+        unlimited_dims = unlimited_dim
+    if isinstance(unlimited_dims, str):
+        unlimited_dims = (unlimited_dims,)
 
-    target_path = Path(file)
-
-    if parallel:
-        if not mpi_context:
-            from ..mpi.context import get_mpi_ctx
-
-            mpi_context = get_mpi_ctx()
-        if not isinstance(mpi_context, MPIContext):
-            mpi_context = MPIContext(mpi_context)
-
-        mpi_meta = mpp_get_meta(data)
-        distributed = mpi_meta is not None
-
-        # Ranks must agree on the write path. If one rank saw valid mpi_meta
-        # and another did not, the two paths post different collectives and
-        # the writer would block instead of reporting the inconsistency.
-        agreed = gather_v(distributed, mpi_context.comm)
-        if any(agreed) and not all(agreed):
-            disagreeing = [
-                rank for rank, state in enumerate(agreed) if state != agreed[0]
-            ]
-            raise mpi_context.MPIError(
-                f"MPI ranks disagree on distribution state: {disagreeing}."
-            )
-
-        if distributed:
-            distributed_dim = str(mpi_meta["dim"])
-            if partition_dim is not None and partition_dim != distributed_dim:
-                raise ValueError(
-                    f"partition_dim={partition_dim!r} differs from distributed "
-                    + f"dim={distributed_dim!r}."
-                )
-            partition_dim = distributed_dim
-        elif mpi_context.comm.rank != 0:
-            data = empty_dataset()
-
-        mpp_to_netcdf_parallel(
-            mpi_context,
-            data,
-            target_path,
-            partition_dim=partition_dim,
-            deflate=complevel if zlib else None,
-            shuffle=shuffle,
-            chunks=chunks,
-            unlimited_dim=unlimited_dim if unlimited_dim is not None else (),
-            hints=hints,
-            nofill=nofill,
-            allow_serial=allow_serial,
+    if not parallel:
+        dataset = strip_mpi_meta(
+            data.to_dataset() if isinstance(data, xr.DataArray) else data
+        )
+        dataset.to_netcdf(
+            file,
+            mode="a" if isinstance(data, xr.DataArray) and Path(file).exists() else "w",
+            format=format,
+            engine="netcdf4",
+            encoding=default_encoding(
+                dataset,
+                encoding,
+                zlib=zlib,
+                complevel=complevel,
+                shuffle=shuffle,
+                chunks=chunks,
+            ),
+            unlimited_dims=unlimited_dims,
         )
         return
 
-    to_netcdf_serial(
-        data=data,
-        file=target_path,
-        unlimited_dim=unlimited_dim,
-        batch_size=batch_size,
-        format=format,
-        shuffle=shuffle,
+    if not mpi_context:
+        from ..mpi.context import get_mpi_ctx
+
+        mpi_context = get_mpi_ctx()
+    if not isinstance(mpi_context, MPIContext):
+        mpi_context = MPIContext(mpi_context)
+
+    # Ranks must take the same path; disagreement is reported instead of hanging.
+    distributed = mpp_get_meta(data) is not None
+    agreed = gather_v(distributed, mpi_context.comm)
+    if any(agreed) and not all(agreed):
+        disagreeing = [rank for rank, state in enumerate(agreed) if state != agreed[0]]
+        raise mpi_context.MPIError(
+            f"MPI ranks disagree on distribution state: {disagreeing}."
+        )
+
+    if distributed:
+        meta = mpp_get_meta(data)
+        if partition_dim is not None and partition_dim not in meta["dims"]:
+            raise ValueError(
+                f"partition_dim={partition_dim!r} is not among the distributed "
+                + f"dims {tuple(meta['dims'])!r}."
+            )
+    else:
+        data = partition(
+            data if mpi_context.is_root() else None,
+            mpi_context,
+            dim="auto" if partition_dim is None else partition_dim,
+        )._prepare()
+
+    mpp_to_netcdf_parallel(
+        mpi_context,
+        data,
+        file,
+        encoding=encoding,
+        unlimited_dims=unlimited_dims,
         zlib=zlib,
         complevel=complevel,
-        show_progress=show_progress,
-        stdout=stdout,
-        tmpdir=mpi_context.tmp_dir if isinstance(mpi_context, MPIContext) else None,
+        shuffle=shuffle,
+        chunks=chunks,
+        hints=hints,
+        nofill=nofill,
+        allow_serial=allow_serial,
     )

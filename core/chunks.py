@@ -5,13 +5,14 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Any, cast
 
+import numpy as np
 import xarray as xr
 from dask import array as dask_array
 
 from ..mpp.mpp_domains_define import mpp_compute_extent
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable, Iterable, Mapping
+    from collections.abc import Hashable, Mapping
 
 # Keep chunks below HDF5's 4 GiB hard limit; target half the limit for filter overhead.
 MAX_SAVE_CHUNK_BYTES = 2**31
@@ -118,18 +119,6 @@ def prune_chunk_info(
     }
 
 
-def _other_dims_bytes(
-    itemsize: int,
-    dims: Iterable[Hashable],
-    shape: Iterable[int],
-    partition_dim: Hashable | None,
-) -> int:
-    """Return bytes contributed by one partition-dimension element."""
-    return itemsize * math.prod(
-        length for dim, length in zip(dims, shape, strict=True) if dim != partition_dim
-    )
-
-
 def _cap_partition_chunk_to_hdf5_limit(preferred: int, other_bytes: int) -> int:
     """Shrink a partition-dimension save_chunk length to fit the HDF5 4 GiB chunk
     limit."""
@@ -138,30 +127,7 @@ def _cap_partition_chunk_to_hdf5_limit(preferred: int, other_bytes: int) -> int:
     return max(1, MAX_SAVE_CHUNK_BYTES // other_bytes)
 
 
-def get_partition_chunk_size(
-    ds: xr.Dataset, partition_dim: str | None, mpi_size: int
-) -> int | None:
-    """Return the per-rank-aligned HDF5 save_chunk length for ``partition_dim``."""
-    if partition_dim is None or partition_dim not in ds.sizes:
-        return ds.sizes.get(partition_dim)
-
-    length = int(ds.sizes[partition_dim])
-    preferred = max(1, math.ceil(length / mpi_size))
-
-    other_bytes = max(
-        (
-            _other_dims_bytes(
-                variable.dtype.itemsize, variable.dims, variable.shape, partition_dim
-            )
-            for variable in ds.data_vars.values()
-            if partition_dim in variable.dims
-        ),
-        default=1,
-    )
-    return _cap_partition_chunk_to_hdf5_limit(preferred, other_bytes)
-
-
-def _validate_explicit_chunk_bytes(
+def validate_explicit_chunk_bytes(
     ds: xr.Dataset, explicit: Mapping[str, tuple[int, ...]]
 ) -> None:
     """Reject explicit chunks that exceed the save-size limit."""
@@ -180,41 +146,6 @@ def _validate_explicit_chunk_bytes(
         raise ValueError(
             "Explicit chunks exceed the HDF5 4 GiB limit: " + "; ".join(offenders)
         )
-
-
-def get_chunks(
-    ds: xr.Dataset,
-    chunks: Mapping[str, Iterable[int]] | None,
-    partition_dim: str | None = None,
-    partition_length: int | None = None,
-) -> dict[str, tuple[int, ...]]:
-    """Return explicit or existing save_chunk shapes for every variable."""
-    if chunks is not None:
-        explicit = {
-            name: tuple(int(length) for length in shape)
-            for name, shape in chunks.items()
-        }
-        _validate_explicit_chunk_bytes(ds, explicit)
-        return explicit
-
-    output: dict[str, tuple[int, ...]] = {}
-    for name, da in ds.variables.items():
-        if da.ndim == 0 or any(length == 0 for length in da.shape):
-            continue
-        chunked = da if da.chunks is not None else da.chunk("auto")
-        if chunked.chunks is None:
-            shape = tuple(int(length) for length in da.shape)
-        else:
-            shape = tuple(max(chunked.chunksizes[dim]) for dim in da.dims)
-        if (
-            partition_dim is not None
-            and partition_length is not None
-            and partition_dim in da.dims
-        ):
-            axis = da.dims.index(partition_dim)
-            shape = shape[:axis] + (int(partition_length),) + shape[axis + 1 :]
-        output[name] = shape
-    return output
 
 
 def _largest_divisor_at_most(value: int, ceiling: int) -> int:
@@ -310,7 +241,9 @@ def compute_save_chunks(
             global_sizes[var_dim] if var_dim in dims else int(length)
             for var_dim, length in zip(var_dims, variable.shape, strict=True)
         )
-        mock = dask_array.zeros(shape, dtype=variable.dtype, chunks="auto")
+        # cftime (object) values are written as numbers, and dask cannot size objects.
+        mock_dtype = np.dtype("f8") if variable.dtype.kind == "O" else variable.dtype
+        mock = dask_array.zeros(shape, dtype=mock_dtype, chunks="auto")
 
         save_chunk: list[int] = []
         for var_dim, length, blocks in zip(var_dims, shape, mock.chunks, strict=True):

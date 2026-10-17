@@ -132,4 +132,97 @@ new = np.linspace(0.0, 40.0, 13)
 lo, hi = mpp_compute_extent(len(new), comm.rank, comm.size)
 T("interp", lambda: x.interp("t", new[lo:hi]), ref.interp(t=new).values)
 T("differentiate", lambda: x.differentiate("t"), ref.differentiate("t").values, 1e-8)
+
+# Rank-local operations must not enter any collective, and mixed
+# xarray/MPIXarray operands must stay distributed.
+calls = []
+raise_if_error = type(mpi).raise_if_error
+type(mpi).raise_if_error = lambda self, *a, **k: (
+    calls.append(a),
+    raise_if_error(self, *a, **k),
+)[1]
+local = np.exp(x) * 2.0 + x - x.where(x > 0)
+type(mpi).raise_if_error = raise_if_error
+check("local ops use no collectives", len(calls), 0)
+T("local ops value", lambda: local, np.exp(ref) * 2.0 + ref - ref.where(ref > 0))
+T("DataArray + MPIXarray", lambda: ref.isel(t=0) + x, ref.isel(t=0) + ref)
+T("MPIXarray + DataArray", lambda: x + ref.isel(t=0), ref + ref.isel(t=0))
+
+# Every operator dunder is an explicit, documented method and matches native xarray,
+# including reflected forms and scalar operands.
+ints, bools = np.abs((a * 10).astype(int)) % 5 + 1, a > 0
+xi, xb = make(ints, D, "t", {"t": tc}), make(bools, D, "t", {"t": tc})
+ri, rb = (
+    xr.DataArray(ints, dims=D, coords={"t": tc}),
+    xr.DataArray(bools, dims=D, coords={"t": tc}),
+)
+for name in [
+    "add",
+    "sub",
+    "mul",
+    "truediv",
+    "floordiv",
+    "mod",
+    "pow",
+    "and",
+    "or",
+    "xor",
+    "lt",
+    "le",
+    "gt",
+    "ge",
+    "eq",
+    "ne",
+    "radd",
+    "rsub",
+    "rmul",
+    "rtruediv",
+    "rfloordiv",
+    "rmod",
+    "rpow",
+    "rand",
+    "ror",
+    "rxor",
+    "neg",
+    "pos",
+    "abs",
+    "invert",
+]:
+    dunder = f"__{name}__"
+    check(
+        f"{dunder} is a documented method",
+        int(bool(getattr(type(x), dunder).__doc__)),
+        1,
+    )
+import operator as op
+
+for name in [
+    "add",
+    "sub",
+    "mul",
+    "truediv",
+    "floordiv",
+    "mod",
+    "pow",
+    "lt",
+    "le",
+    "gt",
+    "ge",
+    "eq",
+    "ne",
+]:
+    f = getattr(op, name)
+    T(f"{name} array", lambda f=f: f(xi, 3), f(ri, 3))
+    T(f"{name} reflected", lambda f=f: f(3, xi), f(3, ri))
+    T(f"{name} operands", lambda f=f: f(xi, xi), f(ri, ri))
+for name in ("and_", "or_", "xor"):
+    f = getattr(op, name)
+    T(f"{name} bool", lambda f=f: f(xb, xb), f(rb, rb))
+    T(f"{name} reflected", lambda f=f: f(True, xb), f(True, rb))
+for f in (op.neg, op.pos, op.abs, op.invert):
+    T(
+        f"{f.__name__} unary",
+        lambda f=f: f(xb if f is op.invert else x),
+        f(rb if f is op.invert else ref),
+    )
 finish()

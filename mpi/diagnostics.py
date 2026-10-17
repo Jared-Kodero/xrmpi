@@ -56,14 +56,14 @@ def _all_agree(comm: MPI.Comm, healthy: bool, signature: Any) -> bool:
     low = int.from_bytes(digest[:8], "big", signed=True)
     high = int.from_bytes(digest[8:], "big", signed=True)
 
-    # Packed as (-healthy, low, high, -low, -high) so a single MIN carries
-    # the error flag, the digest minimum and (negated) its maximum: one
-    # collective rather than three.
-    send = np.array([-int(healthy), low, high, -low, -high], dtype=np.int64)
+    # Packed as (healthy, low, high, -low, -high) so a single MIN carries the
+    # health flag (1 only when every rank is healthy), the digest minimum and
+    # (negated) its maximum: one collective rather than three.
+    send = np.array([int(healthy), low, high, -low, -high], dtype=np.int64)
     recv = np.empty_like(send)
     comm.Allreduce(send, recv, op=MPI.MIN)
 
-    if recv[0] != -1:  # some rank reported an error
+    if recv[0] != 1:  # some rank reported an error
         return False
     return bool(
         recv[1] == low and recv[2] == high and -recv[3] == low and -recv[4] == high

@@ -235,3 +235,57 @@ def test_progress_bar_without_length() -> None:
     assert list(bar) == [0, 1, 2]
     with pytest.raises(TypeError):
         len(bar)
+
+
+# --- NetCDF backend adapter (guards against xarray internals changing) -----
+def test_schema_defines_lazy_variables_without_writing_them(tmp_path) -> None:
+    import dask.array as da
+    import netCDF4
+    import xarray as xr
+    from xrmpi.core.netcdf_backend import create_schema
+
+    schema = xr.Dataset(
+        {"eager": ("x", np.arange(3.0)), "lazy": (("t", "x"), da.zeros((4, 3)))},
+        attrs={"title": "schema"},
+    )
+    path = tmp_path / "schema.nc"
+    create_schema(str(path), schema, unlimited_dims=("t",))
+    with netCDF4.Dataset(path) as nc:
+        assert nc.title == "schema"
+        assert nc.dimensions["t"].isunlimited() and nc.dimensions["t"].size == 4
+        assert nc["lazy"].dimensions == ("t", "x")
+        np.testing.assert_array_equal(nc["eager"][:], np.arange(3.0))
+
+
+def test_encode_variable_matches_xarray_writer(tmp_path) -> None:
+    import pandas as pd
+    import xarray as xr
+    from xrmpi.core.netcdf_backend import encode_variable
+
+    time = xr.Variable("t", pd.date_range("2000-01-01", periods=5, freq="6h"))
+    options = {
+        "units": "hours since 2000-01-01",
+        "dtype": "int32",
+        "calendar": "standard",
+    }
+    encoded = encode_variable("t", time, options)
+    path = tmp_path / "native.nc"
+    xr.Dataset(coords={"t": time}).to_netcdf(path, encoding={"t": options})
+    with xr.open_dataset(path, decode_times=False) as native:
+        np.testing.assert_array_equal(encoded.values, native["t"].values)
+        assert encoded.dtype == native["t"].dtype
+        assert encoded.attrs["units"] == native["t"].attrs["units"]
+
+
+def test_default_encoding_compresses_numeric_variables_only() -> None:
+    import xarray as xr
+    from xrmpi.core.netcdf_backend import default_encoding
+
+    data = xr.Dataset(
+        {"a": ("x", np.zeros(2)), "s": ("x", np.array(["u", "v"])), "c": ((), 1.0)},
+        coords={"x": [0, 1]},
+    )
+    merged = default_encoding(data, {"a": {"complevel": 9}}, chunks={"x": (2,)})
+    assert merged["a"] == {"zlib": True, "complevel": 9, "shuffle": True}
+    assert merged["x"] == {"chunksizes": (2,)}
+    assert "s" not in merged and "c" not in merged

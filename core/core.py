@@ -31,7 +31,6 @@ from .elementwise import (
 )
 from .handles import MPIGroupBy, MPIResample, MPIRolling, MPIXarrayWeighted
 from .indexing import mpp_isel, mpp_reindex, mpp_sel, mpp_sortby
-from .io import mpp_attach_save_chunks
 from .meta import PARTITIONED_ATTR as _PARTITIONED_ATTR
 from .meta import mpp_get_meta, mpp_set_meta, strip_mpi_meta
 from .reductions import (
@@ -186,8 +185,6 @@ class MPIXarray:
         if not isinstance(mpi_context, MPIContext):
             mpi_context = MPIContext(mpi_context)
 
-        self._missing_pnetcdf()
-
         if isinstance(data, MPIXarray):
             self.data = data.data
             self.meta = data.meta
@@ -247,16 +244,6 @@ class MPIXarray:
             f"See MPIXarray's `_SAFE_PASSTHROUGH_METHODS`."
         )
         return call
-
-    def _missing_pnetcdf(self) -> None:
-        """Raise an error if parallel NetCDF-4 support is missing on root rank."""
-
-        import netCDF4
-
-        if netCDF4.__has_parallel4_support__:
-            return
-        else:
-            raise RuntimeError("netCDF4 lacks parallel HDF5 support.")
 
     # Binary operators require compatible partition ownership; matmul may contract it.
 
@@ -437,17 +424,19 @@ class MPIXarray:
         partition_dim: str | None = None,
         *,
         parallel: bool = False,
-        batch_size: int = 24,
+        encoding: Mapping[Hashable, Mapping[str, Any]] | None = None,
+        unlimited_dims: str | Iterable[str] | None = None,
         format: str = "NETCDF4",
         shuffle: bool = True,
         zlib: bool = True,
         complevel: int = 4,
-        show_progress: bool = True,
-        stdout: Any = None,
         chunks: Mapping[str, Iterable[int]] | None = None,
         hints: str | None = None,
         nofill: bool = True,
         allow_serial: bool = False,
+        batch_size: int | None = None,
+        show_progress: bool | None = None,
+        stdout: Any = None,
     ) -> None:
         """Write this xarray object to NetCDF.
 
@@ -456,25 +445,22 @@ class MPIXarray:
         file : str or os.PathLike
             Output path.
         unlimited_dim : str or iterable of str, optional
-            Unlimited dimension names.
+            Alias of ``unlimited_dims``.
         partition_dim : str, optional
-            Dimension used for MPI partitioning.
+            Dimension used to partition root-owned input.
         parallel : bool, default False
-            Use MPI-parallel NetCDF output.
-        batch_size : int, default 24
-            Number of slices per serial append.
+            Use MPI-parallel NetCDF output. Required for distributed data.
+        encoding : mapping, optional
+            Per-variable encoding, as in :meth:`xarray.Dataset.to_netcdf`.
+        unlimited_dims : str or iterable of str, optional
+            Unlimited dimensions, as in xarray.
         format : str, default "NETCDF4"
             NetCDF format used for serial output.
-        shuffle : bool, default True
-            Enable the HDF5 shuffle filter.
-        zlib : bool, default True
-            Enable zlib compression.
+        shuffle, zlib : bool, default True
+            HDF5 filters applied to numeric data variables unless ``encoding`` says
+            otherwise.
         complevel : int, default 4
             zlib compression level.
-        show_progress : bool, default True
-            Show serial write progress.
-        stdout : Any, optional
-            Stream used for progress output.
         chunks : mapping, optional
             Explicit NetCDF variable chunk shapes.
         hints : str, optional
@@ -483,6 +469,8 @@ class MPIXarray:
             Disable NetCDF pre-filling for parallel output.
         allow_serial : bool, default False
             Allow the parallel writer to run with one MPI rank.
+        batch_size, show_progress, stdout
+            Deprecated and ignored.
 
         Raises
         ------
@@ -497,31 +485,23 @@ class MPIXarray:
                 "Distributed data requires parallel=True for NetCDF output."
             )
 
-        prepared = self._prepare()
-        if parallel:
-            prepared = mpp_attach_save_chunks(self._runtime, prepared)
-        if self.meta is not None and mpp_get_meta(prepared) is None:
-            prepared = prepared.copy(deep=False)
-            mpp_set_meta(prepared, self.meta)
-
         to_netcdf(
-            prepared,
+            self._prepare(),
             file,
             self._runtime,
             unlimited_dim,
             partition_dim,
             parallel=parallel,
-            batch_size=batch_size,
             format=format,
             shuffle=shuffle,
             zlib=zlib,
             complevel=complevel,
-            show_progress=show_progress,
-            stdout=stdout,
             chunks=chunks,
             hints=hints,
             nofill=nofill,
             allow_serial=allow_serial,
+            encoding=encoding,
+            unlimited_dims=unlimited_dims,
         )
 
     def repartition(

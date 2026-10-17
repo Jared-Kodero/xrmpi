@@ -13,14 +13,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import _bootstrap
+import _bootstrap  # noqa: F401
 import numpy as np
 import xarray as xr
 import xrmpi as xm
 from xrmpi.core.core import MPIXarray
 from xrmpi.mpi.mpi_init import MPI
-
-_bootstrap.relax_parallel_probe()
 
 # Names the case scripts pull in with ``from mpi_helpers import *``.
 __all__ = [
